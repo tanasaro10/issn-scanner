@@ -3,15 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ISSN Scanner → Sheet</title>
+  <title>ISSN/ISBN Scanner → Google Sheet</title>
   <style>
-    :root {
-      --ok: #12a150;
-      --warn: #b00020;
-      --muted:#666;
-      --card:#fff;
-      --line:#e6e6e6;
-    }
+    :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; }
     body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; background:#fafafa; }
     .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .badge {
@@ -39,7 +33,7 @@
 </head>
 <body>
   <div class="top">
-    <h2 style="margin:0">Scanează ISSN → Google Sheet</h2>
+    <h2 style="margin:0">Scanează ISSN/ISBN → Google Sheet</h2>
     <span id="cfgBadge" class="badge bad">Config lipsă</span>
   </div>
 
@@ -56,14 +50,14 @@
     <div class="muted">Dacă nu pornește camera, asigură-te că pagina e pe HTTPS și ai permis accesul.</div>
   </div>
 
-  <!-- Config ascuns (doar dacă vrei să actualizezi ulterior) -->
+  <!-- Config (ascuns, pentru actualizări ulterioare) -->
   <details class="card config" id="cfgPanel">
     <summary>Config (opțional – pentru a actualiza Script ID & Secret)</summary>
     <div class="row">
       <div style="flex:1; min-width:260px">
         <label>Google Script ID</label>
         <input id="scriptId" type="text" placeholder="AKfycbx..." />
-        <div class="muted ghost">Webhook-ul se construiește automat ca <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
+        <div class="muted ghost">Webhook-ul: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
       </div>
       <div style="flex:1; min-width:220px">
         <label>Secret (Token)</label>
@@ -80,7 +74,7 @@
         <input id="deviceId" type="text" placeholder="ex. phone01" />
       </div>
     </div>
-    <div class="muted">Poți seta o singură dată prin URL: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează local și sunt eliminate din URL.</div>
+    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează și sunt eliminate din URL.</div>
   </details>
 
   <div class="card">
@@ -90,21 +84,15 @@
 
   <script>
     // ============== Config & Badge ==============
-    const BASE_WEBAPP = "https://script.google.com/macros/s/"; // prefix fix
+    const BASE_WEBAPP = "https://script.google.com/macros/s/";
     const badge = document.getElementById('cfgBadge');
     const scriptIdEl = document.getElementById('scriptId');
     const secretEl   = document.getElementById('secret');
     const deviceEl   = document.getElementById('deviceId');
-    const cfgPanel   = document.getElementById('cfgPanel');
 
     function setBadge(ok) {
-      if (ok) {
-        badge.textContent = 'Config OK';
-        badge.classList.remove('bad');
-      } else {
-        badge.textContent = 'Config lipsă';
-        badge.classList.add('bad');
-      }
+      if (ok) { badge.textContent = 'Config OK'; badge.classList.remove('bad'); }
+      else    { badge.textContent = 'Config lipsă'; badge.classList.add('bad'); }
     }
     function getCfg() {
       return {
@@ -117,8 +105,8 @@
       if (typeof scriptId === 'string') localStorage.setItem('scanner_script_id', scriptId.trim());
       if (typeof secret   === 'string') localStorage.setItem('scanner_secret',   secret.trim());
       if (typeof device   === 'string') localStorage.setItem('scanner_device',   device.trim());
-      const ok = Boolean((scriptId ?? getCfg().scriptId) && (secret ?? getCfg().secret));
-      setBadge(ok);
+      const cfg = getCfg();
+      setBadge(Boolean(cfg.scriptId && cfg.secret));
     }
     function clearCfg() {
       localStorage.removeItem('scanner_script_id');
@@ -136,7 +124,7 @@
       setBadge(Boolean(scriptId && secret));
     }
 
-    // Acceptă parametri din URL (SCRIPT_ID/SECRET + aliasuri), salvează, apoi curăță URL-ul
+    // Preluare din URL + curățare parametri
     (function loadFromURL(){
       const params = new URLSearchParams(location.search);
       const sid = params.get('SCRIPT_ID') || params.get('scriptId') || params.get('sid') || params.get('SID') || '';
@@ -145,20 +133,15 @@
       if (sid) { localStorage.setItem('scanner_script_id', sid); changed = true; }
       if (sec) { localStorage.setItem('scanner_secret',   sec); changed = true; }
       if (changed) {
-        // scoatem doar cheile sensibile, păstrăm restul
         ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k => params.delete(k));
         const newQs  = params.toString();
         const newUrl = location.pathname + (newQs ? '?' + newQs : '') + location.hash;
-        history.replaceState(null, '', newUrl); // fără reload
+        history.replaceState(null, '', newUrl);
       }
     })();
 
     fillInputsFromStorage();
-
-    document.getElementById('saveCfgBtn').addEventListener('click', () => {
-      saveCfg({scriptId: scriptIdEl.value, secret: secretEl.value, device: deviceEl.value});
-      log('Config salvată local.', 'ok');
-    });
+    document.getElementById('saveCfgBtn').addEventListener('click', () => { saveCfg({scriptId: scriptIdEl.value, secret: secretEl.value, device: deviceEl.value}); log('Config salvată local.', 'ok'); });
     document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
 
     // ============== Utilități UI & rețea ==============
@@ -167,13 +150,19 @@
       last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
     }
     const secureOk = () => (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
-
     function buildWebhook() {
       const {scriptId} = getCfg();
       return scriptId ? (BASE_WEBAPP + scriptId + "/exec") : '';
     }
 
-    // ===== ISSN helpers =====
+    // ============== Clasificare EAN & lookup titluri ==============
+    function classifyPublication(ean13) {
+      if (!/^\d{13}$/.test(ean13)) return { type:'other' };
+      if (ean13.startsWith('977')) return { type:'issn' };                 // seriale
+      if (ean13.startsWith('978') || ean13.startsWith('979')) return { type:'isbn' }; // cărți
+      return { type:'other' };
+    }
+
     function issnFromEan13(ean) {
       if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
       const issn7 = ean.substring(3, 10);
@@ -183,12 +172,30 @@
       const r = sum % 11, cd = (11 - r) % 11, check = (cd === 10) ? 'X' : String(cd);
       return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
     }
+
+    const titleCache = new Map(); // mic cache în memorie
+
     async function lookupTitleByISSN(issn) {
+      const key = 'issn:'+issn;
+      if (titleCache.has(key)) return titleCache.get(key);
       try {
         const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, { headers:{Accept:'application/json'} });
         if (!r.ok) throw 0; const j = await r.json();
-        return j?.message?.title || j?.message?.publisher || '—';
-      } catch { return '—'; }
+        const t = j?.message?.title || j?.message?.publisher || '—';
+        titleCache.set(key, t); return t;
+      } catch { titleCache.set(key, '—'); return '—'; }
+    }
+
+    async function lookupTitleByISBN(isbn13) {
+      const key = 'isbn:'+isbn13;
+      if (titleCache.has(key)) return titleCache.get(key);
+      try {
+        const r = await fetch(`https://openlibrary.org/isbn/${isbn13}.json`, { headers:{Accept:'application/json'} });
+        if (!r.ok) throw 0;
+        const j = await r.json();
+        const t = j?.title || '—';
+        titleCache.set(key, t); return t;
+      } catch { titleCache.set(key, '—'); return '—'; }
     }
 
     // ===== POST cu fallback anti-CORS =====
@@ -289,28 +296,36 @@
             if (raw === lastEan && (now - lastAt) < 2000) continue;
             lastEan = raw; lastAt = now;
 
-            if (!/^\d{13}$/.test(raw)) { log(`Ignorat (nu e EAN-13): ${raw}`); continue; }
+            const cls = classifyPublication(raw);
+            if (cls.type === 'other') { log(`Detectat GTIN-13 non-publicație: ${raw} (ignorat)`, 'err'); continue; }
 
-            let issn = null, title = '—', variantCode = '';
-            if (raw.startsWith('977')) {
+            let title = '—', issn = null, variantCode = null, isbn = null;
+            if (cls.type === 'issn') {
               const p = issnFromEan13(raw);
               if (p) { issn = p.issn; variantCode = p.variantCode; title = await lookupTitleByISSN(issn); }
-            } else {
-              log(`Detectat ISBN (${raw}). App-ul e pentru ISSN (977).`, 'err');
+            } else if (cls.type === 'isbn') {
+              isbn = raw;
+              title = await lookupTitleByISBN(isbn);
             }
 
             const webhook = buildWebhook();
             const {secret} = getCfg();
             if (!webhook || !secret) {
-              log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Script ID & Secret: vezi secțiunea Config sau pasează în URL o singură dată)`, 'err');
+              log(`EAN: ${raw}\nTip: ${cls.type.toUpperCase()}\nTitlu: ${title}\n(Configurează Script ID & Secret – vezi secțiunea Config sau setează din URL)`, 'err');
               continue;
             }
 
-            const resp = await postToSheet({
-              ean: raw, issn, title, variantCode
-            });
-            if (resp.ok) log(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
-            else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
+            const payload = {
+              type: cls.type, ean: raw,
+              issn: issn || '', isbn: isbn || '',
+              title, variantCode: variantCode || ''
+            };
+            const resp = await postToSheet(payload);
+            if (resp.ok) {
+              log(`✔ Salvat [${cls.type.toUpperCase()}]\nEAN: ${raw}\n${issn?('ISSN: '+issn+'\n'):''}${isbn?('ISBN: '+isbn+'\n'):''}Titlu: ${title}${variantCode?('\nVariant: '+variantCode):''}`, 'ok');
+            } else {
+              log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
+            }
           }
         }
       } catch(e) {
@@ -324,19 +339,14 @@
     startBtn.addEventListener('click', async () => {
       await startCamera();
       const supported = await ensureBarcodeDetector();
-      if (!supported) {
-        log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err');
-        return;
-      }
+      if (!supported) { log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err'); return; }
       detector = new window.BarcodeDetector({ formats: ['ean_13'] });
-      scanning = true;
-      requestAnimationFrame(scanLoop);
+      scanning = true; requestAnimationFrame(scanLoop);
       startBtn.disabled = true;
     });
     stopBtn.addEventListener('click', () => { scanning = false; stopCamera(); startBtn.disabled = false; });
     torchBtn.addEventListener('click', toggleTorch);
 
-    // Afișează avertisment dacă nu e HTTPS
     if (!secureOk()) log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
   </script>
 </body>
