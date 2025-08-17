@@ -5,24 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ISSN/ISBN Scanner → Google Sheet</title>
   <style>
-    :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; }
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; background:#fafafa; }
+    :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; --bg:#fafafa; }
+    body { font-family: system-ui, Arial, sans-serif; margin:0; padding:14px; background:var(--bg); }
     .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; font-weight:600; border:1px solid var(--line); background:#f4fdf7; color:var(--ok); }
     .badge::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block; }
     .badge.bad { background:#fff4f4; color:var(--warn); } .badge.bad::before { background:var(--warn); }
+
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:14px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    video { width:100%; border-radius:12px; background:#000; }
-    button { padding:10px 14px; border-radius:10px; border:1px solid #ccc; background:#f6f6f6; }
+    button { padding:10px 14px; border-radius:10px; border:1px solid #ccc; background:#f6f6f6; cursor:pointer; }
     input[type=text], input[type=password] { padding:8px; border-radius:8px; border:1px solid #ccc; width:100%; }
     label { font-size:14px; color:#444; }
     .muted { color:var(--muted); font-size:12px; margin-top:6px; }
     .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space:pre-wrap; }
-    .ok { color: var(--ok); } .err { color: var(--warn); }
+    .ok { color:var(--ok); } .err { color:var(--warn); }
+
+    /* Cameră: colapsată implicit; activă când scanezi */
+    .camera-shell { overflow:hidden; transition:max-height .25s ease, padding .25s ease, border-width .25s ease; max-height:0; padding:0 0; border:0 solid var(--line); border-radius:12px; background:#000; }
+    .camera-shell.active { max-height:70vh; padding:10px; border-width:1px; }
+    video { width:100%; border-radius:8px; background:#000; }
+
     details.config summary { cursor:pointer; font-weight:600; }
     details.config[open] summary { margin-bottom:8px; }
     .ghost { opacity:.6 }
+
+    .status { padding:10px; border-radius:10px; border:1px dashed var(--line); background:#fff; font-size:14px; }
+    .status.wait { background:#fffdf3; border-color:#e8d28b; }
+    .status.ok { background:#f4fdf7; border-color:#cce9d7; }
+    .status.err { background:#fff4f4; border-color:#f0b6b6; }
+
+    .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:#fff; }
+    .pill input { scale:1.1; }
+
+    .result { display:grid; grid-template-columns: 1fr; gap:6px; }
+    .result .label { font-weight:600; color:#333; }
+    .actions { display:flex; gap:10px; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -31,16 +49,22 @@
     <span id="cfgBadge" class="badge bad">Config lipsă</span>
   </div>
 
+  <!-- Controale cameră + preferințe -->
   <div class="card">
     <div class="row">
-      <button id="startBtn">Start cameră</button>
-      <button id="stopBtn" disabled>Stop cameră</button>
-      <button id="toggleTorchBtn" disabled>Torch</button>
+      <button id="startBtn">Pornește scanarea</button>
+      <button id="stopBtn" disabled>Oprește</button>
+      <button id="toggleTorchBtn" disabled>Lanternă</button>
+      <span class="pill"><input type="checkbox" id="cbContinuous"><label for="cbContinuous">Scanare continuă</label></span>
+      <span class="pill"><input type="checkbox" id="cbAutoSave"><label for="cbAutoSave">Salvare automată</label></span>
     </div>
-    <div style="margin-top:10px"><video id="preview" playsinline muted></video></div>
-    <div class="muted">Dacă nu pornește camera, asigură-te că pagina e pe HTTPS și ai permis accesul.</div>
+    <div id="cameraShell" class="camera-shell">
+      <video id="preview" playsinline muted></video>
+    </div>
+    <div class="muted">Camera se deschide doar la scanare. Dacă „Scanare continuă” nu e bifată, se va opri automat după primul cod citit.</div>
   </div>
 
+  <!-- Config (opțional – pentru actualizări ulterioare) -->
   <details class="card config" id="cfgPanel">
     <summary>Config (opțional – Script ID & Secret)</summary>
     <div class="row">
@@ -64,56 +88,90 @@
         <input id="deviceId" type="text" placeholder="ex. phone01" />
       </div>
     </div>
-    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează și sunt eliminate din URL.</div>
+    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează local și sunt eliminate din URL.</div>
   </details>
 
+  <!-- Introducere manuală ISBN -->
   <div class="card">
     <div class="row">
       <div style="flex:1; min-width:260px">
-        <label>ISBN (manual, util pt. EAN 594…)</label>
+        <label>ISBN (manual, util pentru EAN 594…)</label>
         <input id="manualIsbn" type="text" placeholder="978..." />
       </div>
       <div>
-        <button id="manualLookupBtn">Lookup + Salvează</button>
+        <button id="manualLookupBtn">Caută</button>
       </div>
     </div>
-    <div class="muted">Dacă scanezi un EAN care nu e 978/979 (ex. 594...), introdu aici ISBN-ul tipărit pe copertă.</div>
+    <div class="muted">Dacă scanezi un EAN non-publicație (ex. 594…), introdu aici ISBN-ul tipărit pe copertă.</div>
   </div>
 
+  <!-- Status + rezultat curent -->
   <div class="card">
-    <div><strong>Ultima detecție</strong></div>
+    <div id="statusBox" class="status">Gata de scanare.</div>
+    <div id="resultBox" class="result" style="display:none; margin-top:8px"></div>
+    <div id="resultActions" class="actions" style="display:none">
+      <button id="saveBtn">Salvează</button>
+      <button id="discardBtn">Nu salva</button>
+    </div>
+  </div>
+
+  <!-- Log detalii tehnice (istoric) -->
+  <div class="card">
+    <div><strong>Jurnal</strong></div>
     <div id="last" class="log"></div>
   </div>
 
   <script>
-    // ---------- Config & badge ----------
+    // ========= Config & badge =========
     const BASE_WEBAPP = "https://script.google.com/macros/s/";
     const badge = document.getElementById('cfgBadge');
     const scriptIdEl = document.getElementById('scriptId');
     const secretEl   = document.getElementById('secret');
     const deviceEl   = document.getElementById('deviceId');
 
+    const cbContinuous = document.getElementById('cbContinuous');
+    const cbAutoSave   = document.getElementById('cbAutoSave');
+
+    const cameraShell  = document.getElementById('cameraShell');
+    const statusBox    = document.getElementById('statusBox');
+    const resultBox    = document.getElementById('resultBox');
+    const resultActions= document.getElementById('resultActions');
+    const saveBtn      = document.getElementById('saveBtn');
+    const discardBtn   = document.getElementById('discardBtn');
+
     function setBadge(ok){ if(ok){ badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
-    function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
+    function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'', cont: localStorage.getItem('pref_continuous')==='1', autosave: localStorage.getItem('pref_autosave')==='1' }; }
     function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret)); }
     function clearCfg(){ localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device'); scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.', 'ok'); }
-    function fillInputsFromStorage(){ const {scriptId,secret,device}=getCfg(); scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device; setBadge(Boolean(scriptId && secret)); }
-    (function loadFromURL(){ const p=new URLSearchParams(location.search); const sid=p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||''; const sec=p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||''; let changed=false; if(sid){localStorage.setItem('scanner_script_id',sid);changed=true;} if(sec){localStorage.setItem('scanner_secret',sec);changed=true;} if(changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k)); const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); } })();
+
+    function fillInputsFromStorage(){
+      const {scriptId, secret, device, cont, autosave} = getCfg();
+      scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device;
+      cbContinuous.checked = cont; cbAutoSave.checked = autosave;
+      setBadge(Boolean(scriptId && secret));
+    }
+    (function loadFromURL(){
+      const p=new URLSearchParams(location.search);
+      const sid=p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||'';
+      const sec=p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||'';
+      let changed=false; if(sid){localStorage.setItem('scanner_script_id',sid);changed=true;} if(sec){localStorage.setItem('scanner_secret',sec);changed=true;}
+      if(changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k)); const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); }
+    })();
     fillInputsFromStorage();
-    document.getElementById('saveCfgBtn').addEventListener('click',()=>{ saveCfg({scriptId:scriptIdEl.value,secret:secretEl.value,device:deviceEl.value}); log('Config salvată local.', 'ok'); });
+    document.getElementById('saveCfgBtn').addEventListener('click',()=>{ saveCfg({scriptId:scriptIdEl.value,secret:secretEl.value,device:deviceEl.value}); msg('Config salvată local.', 'ok'); });
     document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
 
-    // ---------- Utils ----------
-    function log(msg, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML; }
+    cbContinuous.addEventListener('change', ()=> localStorage.setItem('pref_continuous', cbContinuous.checked ? '1':'0'));
+    cbAutoSave.addEventListener('change', ()=> localStorage.setItem('pref_autosave',   cbAutoSave.checked ? '1':'0'));
+
+    // ========= Utils UI =========
+    function msg(text, type=''){ statusBox.className='status ' + (type||''); statusBox.textContent=text; }
+    function log(text, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${text}</div>` + last.innerHTML; }
     const secureOk = () => (window.isSecureContext || location.protocol==='https:' || location.hostname==='localhost');
     function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
 
-    function classifyPublication(ean13){
-      if (!/^\d{13}$/.test(ean13)) return {type:'other'};
-      if (ean13.startsWith('977')) return {type:'issn'};
-      if (ean13.startsWith('978') || ean13.startsWith('979')) return {type:'isbn'};
-      return {type:'other'};
-    }
+    // ========= Clasificare & lookups (client fallback) =========
+    function classifyPublication(ean13){ if(!/^\d{13}$/.test(ean13)) return {type:'other'}; if(ean13.startsWith('977')) return {type:'issn'}; if(ean13.startsWith('978')||ean13.startsWith('979')) return {type:'isbn'}; return {type:'other'}; }
     function issnFromEan13(ean){
       if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
       const issn7 = ean.substring(3,10), variant = ean.substring(10,12);
@@ -121,202 +179,171 @@
       const r=s%11, cd=(11-r)%11, check=(cd===10)?'X':String(cd);
       return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
     }
-
-    // ---------- Client fallback lookups (doar dacă serverul nu găsește) ----------
     async function safeJson(url, opts){ try{ const r=await fetch(url, opts||{}); if(!r.ok) throw 0; return await r.json(); } catch{ return null; } }
+
     async function lookupISBNLocal(isbn){
-      // OL exact
       const a = await safeJson(`https://openlibrary.org/isbn/${isbn}.json`);
       if (a && (a.title || a.by_statement)) {
-        let authors=[];
-        if (Array.isArray(a.authors)) {
-          const names = await Promise.all(a.authors.slice(0,3).map(async x => {
-            const aj = await safeJson(`https://openlibrary.org${x.key}.json`); return aj?.name || '';
-          }));
-          authors = names.filter(Boolean);
-        }
-        return {
-          title: a.title || a.by_statement || '—',
-          subtitle: a.subtitle || '', authors,
-          publisher: Array.isArray(a.publishers)? a.publishers.join(', '): (a.publishers||''),
-          publishedDate: a.publish_date || '', pages: a.number_of_pages || '',
-          language: Array.isArray(a.languages)? a.languages.map(l=>l?.key?.split('/').pop()).join(','): '',
-          categories: Array.isArray(a.subjects)? a.subjects.slice(0,5).join(', ') : '',
-          cover: (a.covers && a.covers.length) ? `https://covers.openlibrary.org/b/id/${a.covers[0]}-M.jpg` : '',
-          source:'openlibrary'
-        };
+        let authors=[]; if (Array.isArray(a.authors)) { const names=await Promise.all(a.authors.slice(0,3).map(async x=>{ const aj=await safeJson(`https://openlibrary.org${x.key}.json`); return aj?.name||''; })); authors = names.filter(Boolean); }
+        return { title:a.title||a.by_statement||'—', subtitle:a.subtitle||'', authors, publisher:Array.isArray(a.publishers)?a.publishers.join(', '):(a.publishers||''), publishedDate:a.publish_date||'', pages:a.number_of_pages||'', language:Array.isArray(a.languages)?a.languages.map(l=>l?.key?.split('/').pop()).join(','):'', categories:Array.isArray(a.subjects)?a.subjects.slice(0,5).join(', '):'', cover:(a.covers&&a.covers.length)?`https://covers.openlibrary.org/b/id/${a.covers[0]}-M.jpg`:'', source:'openlibrary' };
       }
-      // OL search
       const s = await safeJson(`https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}`);
       const d = s?.docs?.[0];
-      if (d) {
-        return {
-          title: d.title || '—', subtitle: d.subtitle || '',
-          authors: Array.isArray(d.author_name)? d.author_name : [],
-          publisher: Array.isArray(d.publisher)? d.publisher.slice(0,3).join(', ') : (d.publisher||''),
-          publishedDate: d.first_publish_year ? String(d.first_publish_year) : (d.publish_date && d.publish_date[0]) || '',
-          pages: d.number_of_pages_median || '', language: Array.isArray(d.language)? d.language.join(',') : '',
-          categories: Array.isArray(d.subject)? d.subject.slice(0,5).join(', ') : '',
-          cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : '',
-          source:'openlibrary_search'
-        };
-      }
-      // Google Books
+      if (d){ return { title:d.title||'—', subtitle:d.subtitle||'', authors:Array.isArray(d.author_name)?d.author_name:[], publisher:Array.isArray(d.publisher)?d.publisher.slice(0,3).join(', '):(d.publisher||''), publishedDate:d.first_publish_year?String(d.first_publish_year):(d.publish_date&&d.publish_date[0])||'', pages:d.number_of_pages_median||'', language:Array.isArray(d.language)?d.language.join(','):'', categories:Array.isArray(d.subject)?d.subject.slice(0,5).join(', '):'', cover:d.cover_i?`https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`:'', source:'openlibrary_search' }; }
       const g = await safeJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`);
       const it = g?.items?.[0], v=it?.volumeInfo||null;
-      if (v) {
-        return {
-          title: v.title || '—', subtitle: v.subtitle || '',
-          authors: Array.isArray(v.authors)? v.authors:[],
-          publisher: v.publisher || '', publishedDate: v.publishedDate || '',
-          pages: v.pageCount || '', language: v.language || '',
-          categories: Array.isArray(v.categories)? v.categories.join(', ') : '',
-          cover: v.imageLinks?.thumbnail || '', source:'googlebooks'
-        };
-      }
+      if (v){ return { title:v.title||'—', subtitle:v.subtitle||'', authors:Array.isArray(v.authors)?v.authors:[], publisher:v.publisher||'', publishedDate:v.publishedDate||'', pages:v.pageCount||'', language:v.language||'', categories:Array.isArray(v.categories)?v.categories.join(', '):'', cover:v.imageLinks?.thumbnail||'', source:'googlebooks' }; }
       return null;
     }
     async function lookupISSNLocal(issn){
       const j = await safeJson(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`);
-      if (j?.message) return { title: j.message.title || '—', publisher: j.message.publisher || '', source:'crossref_journals' };
+      if (j?.message) return { title:j.message.title||'—', publisher:j.message.publisher||'', source:'crossref_journals' };
       const w = await safeJson(`https://api.crossref.org/works?filter=issn:${encodeURIComponent(issn)}&rows=1`);
       const it = w?.message?.items?.[0];
-      if (it) return { title: (Array.isArray(it['container-title']) && it['container-title'][0]) || '—', publisher: it.publisher || '', source:'crossref_works' };
+      if (it) return { title:(Array.isArray(it['container-title'])&&it['container-title'][0])||'—', publisher:it.publisher||'', source:'crossref_works' };
       return null;
     }
 
-    // ---------- Server lookup ----------
-async function serverLookup(payload){
-    const {secret} = getCfg(); const webhook = buildWebhook();
-    if (!webhook || !secret) return null;
-
-    // 1) JSON
-    try {
-      const r = await fetch(webhook, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ op:'lookup', token: secret, ...payload })
-      });
-      if (!r.ok) throw 0;
-      const j = await r.json().catch(()=>null);
-      return (j && j.ok) ? j : null;
-    } catch(e1) {
-      // 2) x-www-form-urlencoded
+    // ========= Server lookup & POST (cu fallback anti-CORS) =========
+    async function serverLookup(payload){
+      const {secret} = getCfg(); const webhook = buildWebhook();
+      if (!webhook || !secret) return null;
       try {
-        const form = new URLSearchParams();
-        form.set('op','lookup'); form.set('token', secret);
-        Object.entries(payload).forEach(([k,v]) => form.set(k, v ?? ''));
-        const r2 = await fetch(webhook, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
-          body: form.toString()
-        });
-        const j2 = await r2.json().catch(()=>null);
-        return (j2 && j2.ok) ? j2 : null;
-      } catch(e2) {
-        // 3) no-cors – pentru lookup nu are sens (n-am putea citi răspunsul)
-        return null;
+        const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ op:'lookup', token: secret, ...payload }) });
+        if (!r.ok) throw 0; const j = await r.json().catch(()=>null); return (j && j.ok) ? j : null;
+      } catch { // urlencoded fallback (dacă JSON e blocat)
+        try {
+          const form = new URLSearchParams(); form.set('op','lookup'); form.set('token', secret); Object.entries(payload).forEach(([k,v])=>form.set(k,v??''));
+          const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+          const j2 = await r2.json().catch(()=>null); return (j2 && j2.ok) ? j2 : null;
+        } catch { return null; }
       }
     }
-  }
+    async function postToSheet(payload){
+      const {secret, device} = getCfg(); const webhook = buildWebhook();
+      if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
 
-    // ---------- POST to Sheet ----------
- async function postToSheet(payload){
-    const {secret, device} = getCfg(); const webhook = buildWebhook();
-    if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
-
-    // 1) JSON (poate declanșa preflight)
-    try {
-      const r = await fetch(webhook, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ token:secret, deviceId: device||'', ...payload })
-      });
-      const j = await r.json().catch(()=> ({}));
-      return { ok: !!j.ok, info: j.error || '' };
-    } catch(e1) {
-      // 2) x-www-form-urlencoded (fără preflight în multe contexte)
+      // 1) JSON
       try {
-        const form = new URLSearchParams();
-        form.set('token', secret);
-        form.set('deviceId', device||'');
-        Object.entries(payload).forEach(([k,v]) => form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
-        const r2 = await fetch(webhook, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
-          body: form.toString()
-        });
-        // Uneori tot nu putem citi JSON-ul din cauza CORS; încercăm totuși:
-        const j2 = await r2.json().catch(()=> ({}));
-        return { ok: (j2.ok === true) || r2.ok, info: j2.error || '' };
-      } catch(e2) {
-        // 3) no-cors (ultimul resort): nu putem citi răspunsul, dar request-ul pleacă
+        const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token:secret, deviceId: device||'', ...payload }) });
+        const j = await r.json().catch(()=> ({})); return { ok: !!j.ok, info: j.error || '' };
+      } catch (e1) {
+        // 2) x-www-form-urlencoded
         try {
-          const form = new URLSearchParams();
-          form.set('token', secret);
-          form.set('deviceId', device||'');
-          Object.entries(payload).forEach(([k,v]) => form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
-          await fetch(webhook, {
-            method:'POST',
-            mode:'no-cors',
-            headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
-            body: form.toString()
-          });
-          // Nu putem confirma, dar de obicei ajunge în Sheet:
-          return { ok:true, info:'sent-no-cors' };
-        } catch(e3) {
-          return { ok:false, info:String(e3) };
+          const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
+          const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+          const j2 = await r2.json().catch(()=> ({})); return { ok: (j2.ok===true)||r2.ok, info: j2.error || '' };
+        } catch (e2) {
+          // 3) no-cors (ultim resort)
+          try {
+            const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k,(v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
+            await fetch(webhook, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+            return { ok:true, info:'sent-no-cors' };
+          } catch (e3) { return { ok:false, info:String(e3) }; }
         }
       }
     }
-  }
 
-    // ---------- Cameră + BarcodeDetector ----------
+    // ========= Cameră + BarcodeDetector =========
     const preview = document.getElementById('preview');
     const startBtn = document.getElementById('startBtn');
     const stopBtn  = document.getElementById('stopBtn');
     const torchBtn = document.getElementById('toggleTorchBtn');
-    const manualIsbnEl = document.getElementById('manualIsbn');
-    const manualBtn = document.getElementById('manualLookupBtn');
 
     let stream=null, detector=null, scanning=false;
     let lastEan=null, lastAt=0;
+    let pendingPayload=null; // pentru aprobare manuală
 
     async function ensureBarcodeDetector(){ if (!('BarcodeDetector' in window)) return false; try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; } }
     async function startCamera(){
-      if (!secureOk()) { log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
+      if (!secureOk()) { msg('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
       try{
         stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:{ideal:'environment'}}, audio:false });
         preview.srcObject=stream; await preview.play(); stopBtn.disabled=false;
+        cameraShell.classList.add('active');
         try{ const track=stream.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); if (caps && 'torch' in caps) torchBtn.disabled=false; }catch{}
       }catch(e){
-        if (e.name==='NotAllowedError'||e.name==='SecurityError') log('Acces la cameră blocat de permisiuni.', 'err');
-        else if (e.name==='NotFoundError') log('Nu există cameră disponibilă sau e ocupată.', 'err');
-        else log('Eroare pornire cameră: '+(e.message||e.name), 'err');
+        if (e.name==='NotAllowedError'||e.name==='SecurityError') msg('Acces la cameră blocat de permisiuni.', 'err');
+        else if (e.name==='NotFoundError') msg('Nu există cameră disponibilă sau e ocupată.', 'err');
+        else msg('Eroare pornire cameră: '+(e.message||e.name), 'err');
       }
     }
-    function stopCamera(){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; torchBtn.disabled=true; }
-    async function toggleTorch(){ const track=stream?.getVideoTracks?.()[0]; if(!track) return; try{ const caps=track.getCapabilities?.(); if(!caps||!('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err'); const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ log('Nu pot controla lanterna: '+e.message, 'err'); } }
+    function stopCamera(){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; torchBtn.disabled=true; cameraShell.classList.remove('active'); }
+    async function toggleTorch(){ const track=stream?.getVideoTracks?.()[0]; if(!track) return; try{ const caps=track.getCapabilities?.(); if(!caps||!('torch' in caps)) return msg('Torch nesuportat pe acest device.', 'err'); const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ msg('Nu pot controla lanterna: '+e.message, 'err'); } }
 
-    async function handleIsbn(isbn, fromEan=null){
-      // 1) server lookup
-      let det = await serverLookup({ isbn });
-      // 2) fallback local
-      if (!det || !det.title || det.title==='—') det = await lookupISBNLocal(isbn) || det;
+    function showResultCard(pl){
+      resultBox.style.display='grid';
+      resultActions.style.display = cbAutoSave.checked ? 'none' : 'flex';
+      resultBox.innerHTML = `
+        <div><span class="label">Tip:</span> ${pl.type.toUpperCase()}</div>
+        ${pl.ean ? `<div><span class="label">EAN:</span> ${pl.ean}</div>`:''}
+        ${pl.isbn? `<div><span class="label">ISBN:</span> ${pl.isbn}</div>`:''}
+        ${pl.issn? `<div><span class="label">ISSN:</span> ${pl.issn}</div>`:''}
+        <div><span class="label">Titlu:</span> ${pl.title||'—'}</div>
+        ${pl.authors? `<div><span class="label">Autori:</span> ${pl.authors}</div>`:''}
+        ${pl.publisher? `<div><span class="label">Editura:</span> ${pl.publisher}</div>`:''}
+        ${pl.publishedDate? `<div><span class="label">Data:</span> ${pl.publishedDate}</div>`:''}
+        ${pl.pages? `<div><span class="label">Pagini:</span> ${pl.pages}</div>`:''}
+        ${pl.source? `<div><span class="label">Sursă:</span> ${pl.source}</div>`:''}
+      `;
+    }
+    function hideResultCard(){ resultBox.style.display='none'; resultActions.style.display='none'; resultBox.innerHTML=''; }
 
-      const payload = {
-        type:'isbn', ean: fromEan || '', issn:'', isbn,
-        title: det?.title || '—',
-        authors: (Array.isArray(det?.authors) ? det.authors.join(', ') : (det?.authors||'')),
-        publisher: det?.publisher || '', publishedDate: det?.publishedDate || '',
-        pages: det?.pages || '', language: det?.language || '', categories: det?.categories || '',
-        subtitle: det?.subtitle || '', variantCode:'', cover: det?.cover || '', source: det?.source || ''
-      };
-      const resp = await postToSheet(payload);
-      if (resp.ok) log(`✔ Salvat [ISBN]\nISBN: ${isbn}\nTitlu: ${payload.title}\nSursă: ${payload.source}`, 'ok');
-      else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nISBN: ${isbn}`, 'err');
+    async function handlePayloadAfterLookup(pl){
+      pendingPayload = pl;
+      showResultCard(pl);
+
+      if (cbAutoSave.checked) {
+        const resp = await postToSheet(pl);
+        if (resp.ok) { msg('✔ Salvat automat.', 'ok'); log(`✔ Salvat [${pl.type.toUpperCase()}] ${pl.title||''}`, 'ok'); }
+        else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'), 'err'); log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}`, 'err'); }
+      } else {
+        msg('Gata. Verifică detaliile și apasă „Salvează” sau „Nu salva”.', 'ok');
+      }
     }
 
+    async function processEAN(raw){
+      const cls = classifyPublication(raw);
+      if (cls.type==='other'){ log(`Detectat EAN non-publicație: ${raw}`, 'err'); msg('Cod non-publicație. Poți introduce ISBN manual mai jos.', 'err'); return; }
+
+      let pl = { type: cls.type, ean: raw, issn:'', isbn:'', title:'—', authors:'', publisher:'', publishedDate:'', pages:'', language:'', categories:'', subtitle:'', cover:'', source:'', variantCode:'' };
+
+      msg('Așteaptă, caut informații…', 'wait'); hideResultCard();
+
+      if (cls.type==='issn'){
+        const p = issnFromEan13(raw);
+        if (!p){ msg('ISSN derivat invalid.', 'err'); return; }
+        pl.issn=p.issn; pl.variantCode=p.variantCode;
+        let det = await serverLookup({ issn:p.issn }); if (!det || !det.title || det.title==='—') det = await lookupISSNLocal(p.issn) || det;
+        pl.title = det?.title || '—'; pl.publisher = det?.publisher || ''; pl.source = det?.source || '';
+      } else if (cls.type==='isbn'){
+        pl.isbn = raw;
+        let det = await serverLookup({ isbn: raw }); if (!det || !det.title || det.title==='—') det = await lookupISBNLocal(raw) || det;
+        pl.title = det?.title || '—';
+        pl.subtitle = det?.subtitle || '';
+        pl.authors = Array.isArray(det?.authors)? det.authors.join(', '):(det?.authors||'');
+        pl.publisher = det?.publisher || '';
+        pl.publishedDate = det?.publishedDate || '';
+        pl.pages = det?.pages || '';
+        pl.language = det?.language || '';
+        pl.categories = det?.categories || '';
+        pl.cover = det?.cover || '';
+        pl.source = det?.source || '';
+      }
+
+      await handlePayloadAfterLookup(pl);
+    }
+
+    async function handleIsbnManual(isbn){
+      const clean = isbn.trim().replace(/[^\dXx]/g,''); if (!clean){ msg('Introdu un ISBN valid.', 'err'); return; }
+      msg('Așteaptă, caut informații…', 'wait'); hideResultCard();
+      let det = await serverLookup({ isbn: clean }); if (!det || !det.title || det.title==='—') det = await lookupISBNLocal(clean) || det;
+      let pl = { type:'isbn', ean:'', issn:'', isbn: clean, title: det?.title||'—', authors: Array.isArray(det?.authors)? det.authors.join(', '):(det?.authors||''), publisher: det?.publisher||'', publishedDate: det?.publishedDate||'', pages: det?.pages||'', language: det?.language||'', categories: det?.categories||'', subtitle: det?.subtitle||'', cover: det?.cover||'', source: det?.source||'', variantCode:'' };
+      await handlePayloadAfterLookup(pl);
+    }
+
+    // ========= Scan loop =========
+    let scanOnceArmed = false;
     async function scanLoop(){
       if (!detector || !scanning) return;
       try{
@@ -327,48 +354,48 @@ async function serverLookup(payload){
             const now=Date.now(); if (raw===lastEan && (now-lastAt)<2000) continue;
             lastEan=raw; lastAt=now;
 
-            const cls = classifyPublication(raw);
-            if (cls.type==='issn'){
-              const p = issnFromEan13(raw);
-              if (!p) { log(`ISSN derivat invalid din EAN: ${raw}`, 'err'); continue; }
-              // 1) server
-              let det = await serverLookup({ issn: p.issn });
-              // 2) fallback local
-              if (!det || !det.title || det.title==='—') det = await lookupISSNLocal(p.issn) || det;
+            await processEAN(raw);
 
-              const payload = {
-                type:'issn', ean: raw, issn: p.issn, isbn:'', variantCode: p.variantCode,
-                title: det?.title || '—', authors:'', publisher: det?.publisher || '',
-                publishedDate:'', pages:'', language:'', categories:'', subtitle:'', cover:'', source: det?.source || ''
-              };
-              const resp = await postToSheet(payload);
-              if (resp.ok) log(`✔ Salvat [ISSN]\nISSN: ${p.issn}\nTitlu: ${payload.title}\nSursă: ${payload.source}`, 'ok');
-              else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nISSN: ${p.issn}`, 'err');
-
-            } else if (cls.type==='isbn'){
-              await handleIsbn(raw, raw); // ISBN „din EAN”
-            } else {
-              // EAN non-publicație (ex. 594…)
-              log(`Detectat EAN non-publicație: ${raw}. Dacă știi ISBN-ul tipărit, introdu-l în formularul de mai sus.`, 'err');
-            }
+            // oprește camera dacă NU e scanare continuă
+            if (!cbContinuous.checked) { stopCamera(); msg('Scanare oprită după prima citire.', 'ok'); }
+            return; // nu mai procesa alte coduri în același cadru
           }
         }
-      }catch(e){ /* ignora erori izolate */ }
+      }catch(e){ /* ignorăm erorile sporadice */ }
       finally { if (scanning) requestAnimationFrame(scanLoop); }
     }
 
-    // Butoane & manual ISBN
-    startBtn.addEventListener('click', async ()=>{ await startCamera(); const ok=await ensureBarcodeDetector(); if (!ok){ log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err'); return; } detector=new window.BarcodeDetector({formats:['ean_13']}); scanning=true; requestAnimationFrame(scanLoop); startBtn.disabled=true; });
-    stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); startBtn.disabled=false; });
+    // ========= Butoane =========
+    startBtn.addEventListener('click', async ()=>{
+      await startCamera();
+      const ok = await ensureBarcodeDetector();
+      if (!ok) { msg('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err'); return; }
+      detector = new window.BarcodeDetector({ formats:['ean_13'] });
+      scanning = true; startBtn.disabled = true; msg('Scanează codul…', '');
+      requestAnimationFrame(scanLoop);
+    });
+    stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); startBtn.disabled=false; msg('Scanare oprită.', ''); });
     torchBtn.addEventListener('click', toggleTorch);
 
-    manualBtn.addEventListener('click', async ()=>{
-      const isbn = manualIsbnEl.value.trim().replace(/[^\dXx]/g,'');
-      if (!isbn) return log('Introdu un ISBN valid.', 'err');
-      await handleIsbn(isbn, ''); // fără EAN
+    // Manual ISBN
+    document.getElementById('manualLookupBtn').addEventListener('click', async ()=>{
+      const v = document.getElementById('manualIsbn').value;
+      await handleIsbnManual(v);
     });
 
-    if (!secureOk()) log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
+    // Rezultat: salvează / nu salva
+    saveBtn.addEventListener('click', async ()=>{
+      if (!pendingPayload) return;
+      const resp = await postToSheet(pendingPayload);
+      if (resp.ok) { msg('✔ Salvat.', 'ok'); log(`✔ Salvat [${pendingPayload.type.toUpperCase()}] ${pendingPayload.title||''}`, 'ok'); }
+      else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'), 'err'); }
+      pendingPayload = null; hideResultCard();
+    });
+    discardBtn.addEventListener('click', ()=>{
+      pendingPayload = null; hideResultCard(); msg('Intrare ignorată.', '');
+    });
+
+    if (!secureOk()) msg('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
   </script>
 </body>
 </html>
