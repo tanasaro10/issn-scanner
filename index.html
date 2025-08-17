@@ -186,35 +186,90 @@
     }
 
     // ---------- Server lookup ----------
-    async function serverLookup(payload){
-      const {secret} = getCfg(); const webhook = buildWebhook();
-      if (!webhook || !secret) return null;
-      try {
-        const r = await fetch(webhook, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ op:'lookup', token: secret, ...payload })
-        });
-        if (!r.ok) return null;
-        const j = await r.json();
-        if (j && j.ok) return j;
-      } catch {}
-      return null;
-    }
+async function serverLookup(payload){
+    const {secret} = getCfg(); const webhook = buildWebhook();
+    if (!webhook || !secret) return null;
 
-    // ---------- POST to Sheet ----------
-    async function postToSheet(payload){
-      const {secret, device} = getCfg(); const webhook = buildWebhook();
-      if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
+    // 1) JSON
+    try {
+      const r = await fetch(webhook, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ op:'lookup', token: secret, ...payload })
+      });
+      if (!r.ok) throw 0;
+      const j = await r.json().catch(()=>null);
+      return (j && j.ok) ? j : null;
+    } catch(e1) {
+      // 2) x-www-form-urlencoded
       try {
-        const r = await fetch(webhook, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ token:secret, deviceId: device||'', ...payload })
+        const form = new URLSearchParams();
+        form.set('op','lookup'); form.set('token', secret);
+        Object.entries(payload).forEach(([k,v]) => form.set(k, v ?? ''));
+        const r2 = await fetch(webhook, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
+          body: form.toString()
         });
-        const j = await r.json().catch(()=>({})); return { ok: !!j.ok, info: j.error||'' };
-      } catch(e) {
-        return { ok:false, info:String(e) };
+        const j2 = await r2.json().catch(()=>null);
+        return (j2 && j2.ok) ? j2 : null;
+      } catch(e2) {
+        // 3) no-cors – pentru lookup nu are sens (n-am putea citi răspunsul)
+        return null;
       }
     }
+  }
+
+    // ---------- POST to Sheet ----------
+ async function postToSheet(payload){
+    const {secret, device} = getCfg(); const webhook = buildWebhook();
+    if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
+
+    // 1) JSON (poate declanșa preflight)
+    try {
+      const r = await fetch(webhook, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ token:secret, deviceId: device||'', ...payload })
+      });
+      const j = await r.json().catch(()=> ({}));
+      return { ok: !!j.ok, info: j.error || '' };
+    } catch(e1) {
+      // 2) x-www-form-urlencoded (fără preflight în multe contexte)
+      try {
+        const form = new URLSearchParams();
+        form.set('token', secret);
+        form.set('deviceId', device||'');
+        Object.entries(payload).forEach(([k,v]) => form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
+        const r2 = await fetch(webhook, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
+          body: form.toString()
+        });
+        // Uneori tot nu putem citi JSON-ul din cauza CORS; încercăm totuși:
+        const j2 = await r2.json().catch(()=> ({}));
+        return { ok: (j2.ok === true) || r2.ok, info: j2.error || '' };
+      } catch(e2) {
+        // 3) no-cors (ultimul resort): nu putem citi răspunsul, dar request-ul pleacă
+        try {
+          const form = new URLSearchParams();
+          form.set('token', secret);
+          form.set('deviceId', device||'');
+          Object.entries(payload).forEach(([k,v]) => form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
+          await fetch(webhook, {
+            method:'POST',
+            mode:'no-cors',
+            headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
+            body: form.toString()
+          });
+          // Nu putem confirma, dar de obicei ajunge în Sheet:
+          return { ok:true, info:'sent-no-cors' };
+        } catch(e3) {
+          return { ok:false, info:String(e3) };
+        }
+      }
+    }
+  }
 
     // ---------- Cameră + BarcodeDetector ----------
     const preview = document.getElementById('preview');
