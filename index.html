@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ISSN Scanner → Sheet</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    video { width: 100%; border-radius: 12px; background: #000; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #f6f6f6; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+    .ok { color: #0a7a0a; } .err { color: #b00020; }
+    input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
+    label { font-size: 14px; color: #444; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
+</head>
+<body>
+  <h2>Scanează ISSN → Google Sheet</h2>
+
+  <div class="card">
+    <div class="row">
+      <button id="startBtn">Start cameră</button>
+      <button id="stopBtn" disabled>Stop cameră</button>
+      <button id="toggleTorchBtn" disabled>Torch</button>
+    </div>
+    <div style="margin-top:10px">
+      <video id="preview" playsinline muted></video>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div style="flex:1">
+        <label>Endpoint Apps Script</label>
+        <input id="webhook" type="text" placeholder="https://script.google.com/macros/s/AKfycbwcK6vutyz7ROy1cAo5kXe_Npqpxhm472yaom9cLhczCTO-LhULkqDqp-AiFIjEzhVLvw/exec" />
+      </div>
+      <div style="flex-basis:200px">
+        <label>Token</label>
+        <input id="token" type="text" placeholder="dsdasljhl32e32dasdasdaa_damkedsda" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1">
+        <label>Device ID (opțional)</label>
+        <input id="deviceId" type="text" placeholder="ex. phone01" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div><strong>Ultima detecție</strong></div>
+    <div id="last" class="log"></div>
+  </div>
+
+  <script>
+    function issnFromEan13(ean) {
+      if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
+      const issn7 = ean.substring(3, 10);
+      const variant = ean.substring(10, 12);
+      const weights = [8,7,6,5,4,3,2];
+      let sum = 0;
+      for (let i=0;i<7;i++) sum += parseInt(issn7[i],10) * weights[i];
+      const r = sum % 11;
+      let cd = (11 - r) % 11;
+      const check = (cd === 10) ? 'X' : String(cd);
+      const issn = issn7.substring(0,4)+'-'+issn7.substring(4) + check;
+      return { issn, variantCode: variant };
+    }
+
+    async function lookupTitleByISSN(issn) {
+      try {
+        const url = `https://api.crossref.org/journals/${encodeURIComponent(issn)}`;
+        const r = await fetch(url, { headers: { 'Accept': 'application/json' }});
+        if (!r.ok) throw new Error('lookup failed');
+        const j = await r.json();
+        return j?.message?.title || j?.message?.publisher || '—';
+      } catch (e) { return '—'; }
+    }
+
+    async function postToSheet(webhook, token, payload) {
+      const body = JSON.stringify({ token, ...payload });
+      const r = await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body
+      });
+      let ok = false, info = '';
+      try { const j = await r.json(); ok = !!j.ok; info = j.error || ''; } catch {}
+      return { ok, info };
+    }
+
+    const { BrowserMultiFormatReader } = ZXingBrowser;
+    const codeReader = new BrowserMultiFormatReader();
+    const preview = document.getElementById('preview');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn  = document.getElementById('stopBtn');
+    const torchBtn = document.getElementById('toggleTorchBtn');
+    const lastEl   = document.getElementById('last');
+    const webhookEl= document.getElementById('webhook');
+    const tokenEl  = document.getElementById('token');
+    const deviceEl = document.getElementById('deviceId');
+
+    let currentCtrl = null;
+    let torchOn = false;
+    let lastEan = null;
+    let lastAt = 0;
+
+    function log(html, cls='') {
+      lastEl.innerHTML = `<div class="${cls}">${html}</div>` + lastEl.innerHTML;
+    }
+
+    async function start() {
+      lastEl.innerHTML = '';
+      try {
+        const controls = await codeReader.decodeFromVideoDevice(undefined, preview, async (result, err, controls) => {
+          if (controls && !currentCtrl) currentCtrl = controls;
+
+          if (result) {
+            const raw = result.getText().trim();
+            const now = Date.now();
+            if (raw === lastEan && (now - lastAt) < 2000) return;
+            lastEan = raw; lastAt = now;
+
+            if (!/^\d{13}$/.test(raw)) { log(`Ignorat (nu e EAN-13): ${raw}`); return; }
+
+            let title = '—', variantCode = '', issn = null;
+            if (raw.startsWith('977')) {
+              const parsed = issnFromEan13(raw);
+              if (parsed) {
+                issn = parsed.issn;
+                variantCode = parsed.variantCode;
+                title = await lookupTitleByISSN(issn);
+              }
+            } else {
+              log(`Detectat ISBN-EAN (${raw}). App-ul e setat pentru ISSN (977).`, 'err');
+            }
+
+            const webhook = webhookEl.value.trim();
+            const token = tokenEl.value.trim();
+            if (!webhook || !token) {
+              log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Webhook & Token)`, 'err');
+              return;
+            }
+
+            const payload = { ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() || '' };
+            const resp = await postToSheet(webhook, token, payload);
+            if (resp.ok) log(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
+            else log(`✖ Eroare la salvare: ${resp.info || '(unknown)'}\nEAN: ${raw}`, 'err');
+          }
+        });
+        currentCtrl = controls;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        try {
+          const track = preview.srcObject?.getVideoTracks?.[0];
+          const capabilities = track?.getCapabilities?.();
+          if (capabilities && 'torch' in capabilities) torchBtn.disabled = false;
+        } catch {}
+      } catch (e) {
+        log('Nu pot porni camera: ' + e.message, 'err');
+      }
+    }
+
+    function stop() {
+      try { currentCtrl?.stop(); } catch {}
+      currentCtrl = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      torchBtn.disabled = true;
+    }
+
+    async function toggleTorch() {
+      const track = preview.srcObject?.getVideoTracks?.[0];
+      if (!track) return;
+      try {
+        torchOn = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+      } catch (e) { log('Torch nesuportat pe acest device.', 'err'); }
+    }
+
+    startBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', stop);
+    torchBtn.addEventListener('click', toggleTorch);
+    window.addEventListener('beforeunload', stop);
+  </script>
+</body>
+</html>
