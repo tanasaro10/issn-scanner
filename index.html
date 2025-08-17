@@ -5,21 +5,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ISSN Scanner → Sheet</title>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    :root {
+      --ok: #12a150;
+      --warn: #b00020;
+      --muted:#666;
+      --card:#fff;
+      --line:#e6e6e6;
+    }
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; background:#fafafa; }
+    .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .badge {
+      display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+      font-weight:600; border:1px solid var(--line); background:#f4fdf7; color:var(--ok);
+    }
+    .badge::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block; }
+    .badge.bad { background:#fff4f4; color:var(--warn); }
+    .badge.bad::before { background:var(--warn); }
+
+    .card { background:var(--card); border:1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 14px; }
+    .row { display:flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     video { width: 100%; border-radius: 12px; background: #000; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #f6f6f6; }
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
-    .ok { color: #0a7a0a; } .err { color: #b00020; }
-    input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
+    input[type=text], input[type=password] { padding: 8px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
     label { font-size: 14px; color: #444; }
-    .muted { color:#666; font-size:12px; margin-top:6px; }
+    .muted { color:var(--muted); font-size:12px; margin-top:6px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+    .ok { color: var(--ok); } .err { color: var(--warn); }
+
+    details.config summary { cursor:pointer; font-weight:600; }
+    details.config[open] summary { margin-bottom:8px; }
+    .ghost { opacity:.6 }
   </style>
 </head>
 <body>
-  <h2>Scanează ISSN → Google Sheet</h2>
+  <div class="top">
+    <h2 style="margin:0">Scanează ISSN → Google Sheet</h2>
+    <span id="cfgBadge" class="badge bad">Config lipsă</span>
+  </div>
 
+  <!-- Camera + controale -->
   <div class="card">
     <div class="row">
       <button id="startBtn">Start cameră</button>
@@ -29,31 +53,35 @@
     <div style="margin-top:10px">
       <video id="preview" playsinline muted></video>
     </div>
+    <div class="muted">Dacă nu pornește camera, asigură-te că pagina e pe HTTPS și ai permis accesul.</div>
   </div>
 
-  <div class="card">
+  <!-- Config ascuns (doar dacă vrei să actualizezi ulterior) -->
+  <details class="card config" id="cfgPanel">
+    <summary>Config (opțional – pentru a actualiza Script ID & Secret)</summary>
     <div class="row">
-      <div style="flex:1">
-        <label>Endpoint Apps Script</label>
-        <input id="webhook" type="text" placeholder="YOUR_APPS_SCRIPT_WEBAPP_URL" />
+      <div style="flex:1; min-width:260px">
+        <label>Google Script ID</label>
+        <input id="scriptId" type="text" placeholder="AKfycbx..." />
+        <div class="muted ghost">Webhook-ul se construiește automat ca <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
       </div>
-      <div style="flex-basis:220px">
-        <label>Token</label>
-        <input id="token" type="text" placeholder="REPLACE_WITH_SECRET" />
+      <div style="flex:1; min-width:220px">
+        <label>Secret (Token)</label>
+        <input id="secret" type="password" placeholder="••••••" />
       </div>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <div style="flex:1">
-        <label>Device ID (opțional)</label>
-        <input id="deviceId" type="text" placeholder="ex. phone01" />
-      </div>
-      <div>
+      <div style="display:flex; gap:8px; align-items:flex-end">
         <button id="saveCfgBtn" title="Salvează în browser (localStorage)">Salvează</button>
         <button id="clearCfgBtn" title="Șterge din browser">Șterge</button>
       </div>
     </div>
-    <div class="muted">Poți trece valorile direct în URL: <code>?YOUR_APPS_SCRIPT_WEBAPP_URL=&amp;REPLACE_WITH_SECRET=</code>. Vor fi salvate local și apoi eliminate din URL.</div>
-  </div>
+    <div class="row" style="margin-top:8px">
+      <div style="flex:1; min-width:220px">
+        <label>Device ID (opțional)</label>
+        <input id="deviceId" type="text" placeholder="ex. phone01" />
+      </div>
+    </div>
+    <div class="muted">Poți seta o singură dată prin URL: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează local și sunt eliminate din URL.</div>
+  </details>
 
   <div class="card">
     <div><strong>Ultima detecție</strong></div>
@@ -61,72 +89,89 @@
   </div>
 
   <script>
-    // ===== Utils UI =====
+    // ============== Config & Badge ==============
+    const BASE_WEBAPP = "https://script.google.com/macros/s/"; // prefix fix
+    const badge = document.getElementById('cfgBadge');
+    const scriptIdEl = document.getElementById('scriptId');
+    const secretEl   = document.getElementById('secret');
+    const deviceEl   = document.getElementById('deviceId');
+    const cfgPanel   = document.getElementById('cfgPanel');
+
+    function setBadge(ok) {
+      if (ok) {
+        badge.textContent = 'Config OK';
+        badge.classList.remove('bad');
+      } else {
+        badge.textContent = 'Config lipsă';
+        badge.classList.add('bad');
+      }
+    }
+    function getCfg() {
+      return {
+        scriptId: localStorage.getItem('scanner_script_id') || '',
+        secret:   localStorage.getItem('scanner_secret')    || '',
+        device:   localStorage.getItem('scanner_device')    || ''
+      };
+    }
+    function saveCfg({scriptId, secret, device}) {
+      if (typeof scriptId === 'string') localStorage.setItem('scanner_script_id', scriptId.trim());
+      if (typeof secret   === 'string') localStorage.setItem('scanner_secret',   secret.trim());
+      if (typeof device   === 'string') localStorage.setItem('scanner_device',   device.trim());
+      const ok = Boolean((scriptId ?? getCfg().scriptId) && (secret ?? getCfg().secret));
+      setBadge(ok);
+    }
+    function clearCfg() {
+      localStorage.removeItem('scanner_script_id');
+      localStorage.removeItem('scanner_secret');
+      localStorage.removeItem('scanner_device');
+      scriptIdEl.value=''; secretEl.value=''; deviceEl.value='';
+      setBadge(false);
+      log('Config ștearsă.', 'ok');
+    }
+    function fillInputsFromStorage() {
+      const {scriptId, secret, device} = getCfg();
+      scriptIdEl.value = scriptId;
+      secretEl.value   = secret;
+      deviceEl.value   = device;
+      setBadge(Boolean(scriptId && secret));
+    }
+
+    // Acceptă parametri din URL (SCRIPT_ID/SECRET + aliasuri), salvează, apoi curăță URL-ul
+    (function loadFromURL(){
+      const params = new URLSearchParams(location.search);
+      const sid = params.get('SCRIPT_ID') || params.get('scriptId') || params.get('sid') || params.get('SID') || '';
+      const sec = params.get('SECRET')    || params.get('secret')   || params.get('token') || params.get('TOKEN') || '';
+      let changed = false;
+      if (sid) { localStorage.setItem('scanner_script_id', sid); changed = true; }
+      if (sec) { localStorage.setItem('scanner_secret',   sec); changed = true; }
+      if (changed) {
+        // scoatem doar cheile sensibile, păstrăm restul
+        ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k => params.delete(k));
+        const newQs  = params.toString();
+        const newUrl = location.pathname + (newQs ? '?' + newQs : '') + location.hash;
+        history.replaceState(null, '', newUrl); // fără reload
+      }
+    })();
+
+    fillInputsFromStorage();
+
+    document.getElementById('saveCfgBtn').addEventListener('click', () => {
+      saveCfg({scriptId: scriptIdEl.value, secret: secretEl.value, device: deviceEl.value});
+      log('Config salvată local.', 'ok');
+    });
+    document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
+
+    // ============== Utilități UI & rețea ==============
     function log(msg, cls='') {
       const last = document.getElementById('last');
       last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
     }
     const secureOk = () => (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
 
-    // ===== Config din URL / localStorage + CURĂȚARE URL =====
-    const webhookEl = document.getElementById('webhook');
-    const tokenEl   = document.getElementById('token');
-    const deviceEl  = document.getElementById('deviceId');
-
-    function loadConfig() {
-      // 1) din localStorage
-      const lsWebhook = localStorage.getItem('scanner_webhook') || '';
-      const lsToken   = localStorage.getItem('scanner_token') || '';
-      const lsDevice  = localStorage.getItem('scanner_device') || '';
-      if (lsWebhook) webhookEl.value = lsWebhook;
-      if (lsToken)   tokenEl.value   = lsToken;
-      if (lsDevice)  deviceEl.value  = lsDevice;
-
-      // 2) din query string (suprascrie localStorage dacă există)
-      const params = new URLSearchParams(location.search);
-      const qsWebhook = params.get('YOUR_APPS_SCRIPT_WEBAPP_URL') || params.get('webhook') || params.get('url');
-      const qsToken   = params.get('REPLACE_WITH_SECRET') || params.get('token')   || params.get('secret');
-
-      if (qsWebhook) webhookEl.value = qsWebhook;
-      if (qsToken)   tokenEl.value   = qsToken;
-
-      // 3) auto-salvare dacă vin prin URL
-      const hadQueryKeys = Boolean(qsWebhook || qsToken);
-      if (hadQueryKeys) {
-        saveConfig(false); // fără mesaj
-
-        // 4) curățare URL: elimină DOAR cheile folosite, păstrează restul parametrilor
-        const keysToRemove = [
-          'YOUR_APPS_SCRIPT_WEBAPP_URL','webhook','url',
-          'REPLACE_WITH_SECRET','token','secret'
-        ];
-        let changed = false;
-        keysToRemove.forEach(k => { if (params.has(k)) { params.delete(k); changed = true; }});
-        if (changed) {
-          const newQs  = params.toString();
-          const newUrl = location.pathname + (newQs ? '?' + newQs : '') + location.hash;
-          // înlocuiește fără reload & fără istoric înapoi
-          history.replaceState(null, '', newUrl);
-        }
-      }
+    function buildWebhook() {
+      const {scriptId} = getCfg();
+      return scriptId ? (BASE_WEBAPP + scriptId + "/exec") : '';
     }
-
-    function saveConfig(showMsg=true) {
-      localStorage.setItem('scanner_webhook', webhookEl.value.trim());
-      localStorage.setItem('scanner_token',   tokenEl.value.trim());
-      localStorage.setItem('scanner_device',  deviceEl.value.trim());
-      if (showMsg) log('Config salvată local.', 'ok');
-    }
-    function clearConfig() {
-      localStorage.removeItem('scanner_webhook');
-      localStorage.removeItem('scanner_token');
-      localStorage.removeItem('scanner_device');
-      webhookEl.value = ''; tokenEl.value = ''; deviceEl.value = '';
-      log('Config ștearsă din localStorage.', 'ok');
-    }
-    document.getElementById('saveCfgBtn').addEventListener('click', () => saveConfig(true));
-    document.getElementById('clearCfgBtn').addEventListener('click', clearConfig);
-    loadConfig();
 
     // ===== ISSN helpers =====
     function issnFromEan13(ean) {
@@ -147,21 +192,26 @@
     }
 
     // ===== POST cu fallback anti-CORS =====
-    async function postToSheet(webhook, token, payload) {
-      // Încercare 1: JSON
+    async function postToSheet(payload) {
+      const {secret, device} = getCfg();
+      const webhook = buildWebhook();
+      if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
+
+      // 1) JSON
       try {
         const r = await fetch(webhook, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, ...payload })
+          body: JSON.stringify({ token: secret, deviceId: device || '', ...payload })
         });
         const j = await r.json().catch(()=> ({}));
         return { ok: !!j.ok, info: j.error || '' };
       } catch(e1) {
-        // Încercare 2: x-www-form-urlencoded (evită preflight în multe cazuri)
+        // 2) x-www-form-urlencoded
         try {
           const form = new URLSearchParams();
-          form.set('token', token);
+          form.set('token', secret);
+          form.set('deviceId', device || '');
           Object.entries(payload).forEach(([k,v]) => form.set(k, v ?? ''));
           const r2 = await fetch(webhook, {
             method: 'POST',
@@ -176,7 +226,7 @@
       }
     }
 
-    // ===== Cameră / Torch (BarcodeDetector) =====
+    // ============== Cameră + BarcodeDetector ==============
     const preview = document.getElementById('preview');
     const startBtn = document.getElementById('startBtn');
     const stopBtn  = document.getElementById('stopBtn');
@@ -249,26 +299,28 @@
               log(`Detectat ISBN (${raw}). App-ul e pentru ISSN (977).`, 'err');
             }
 
-            const webhook = webhookEl.value.trim(), token = tokenEl.value.trim();
-            if (!webhook || !token) {
-              log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Webhook & Token)`, 'err');
+            const webhook = buildWebhook();
+            const {secret} = getCfg();
+            if (!webhook || !secret) {
+              log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Script ID & Secret: vezi secțiunea Config sau pasează în URL o singură dată)`, 'err');
               continue;
             }
-            const resp = await postToSheet(webhook, token, {
-              ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() || ''
+
+            const resp = await postToSheet({
+              ean: raw, issn, title, variantCode
             });
             if (resp.ok) log(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
             else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
           }
         }
       } catch(e) {
-        // ignoră erorile izolate de detectare
+        // erori izolate la detectare — ignorăm
       } finally {
         if (scanning) requestAnimationFrame(scanLoop);
       }
     }
 
-    // ===== Legare butoane =====
+    // Legare butoane
     startBtn.addEventListener('click', async () => {
       await startCamera();
       const supported = await ensureBarcodeDetector();
@@ -284,7 +336,7 @@
     stopBtn.addEventListener('click', () => { scanning = false; stopCamera(); startBtn.disabled = false; });
     torchBtn.addEventListener('click', toggleTorch);
 
-    // avertisment dacă nu e HTTPS
+    // Afișează avertisment dacă nu e HTTPS
     if (!secureOk()) log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
   </script>
 </body>
