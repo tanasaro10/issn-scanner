@@ -52,7 +52,7 @@
         <button id="clearCfgBtn" title="Șterge din browser">Șterge</button>
       </div>
     </div>
-    <div class="muted">Poți trece valorile direct în URL: <code>?YOUR_APPS_SCRIPT_WEBAPP_URL=&amp;REPLACE_WITH_SECRET=</code>. Vor fi salvate automat local.</div>
+    <div class="muted">Poți trece valorile direct în URL: <code>?YOUR_APPS_SCRIPT_WEBAPP_URL=&amp;REPLACE_WITH_SECRET=</code>. Vor fi salvate local și apoi eliminate din URL.</div>
   </div>
 
   <div class="card">
@@ -68,7 +68,7 @@
     }
     const secureOk = () => (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
 
-    // ===== Config din URL / localStorage =====
+    // ===== Config din URL / localStorage + CURĂȚARE URL =====
     const webhookEl = document.getElementById('webhook');
     const tokenEl   = document.getElementById('token');
     const deviceEl  = document.getElementById('deviceId');
@@ -83,15 +83,34 @@
       if (lsDevice)  deviceEl.value  = lsDevice;
 
       // 2) din query string (suprascrie localStorage dacă există)
-      const q = new URLSearchParams(location.search);
-      const qsWebhook = q.get('YOUR_APPS_SCRIPT_WEBAPP_URL') || q.get('webhook') || q.get('url');
-      const qsToken   = q.get('REPLACE_WITH_SECRET') || q.get('token') || q.get('secret');
+      const params = new URLSearchParams(location.search);
+      const qsWebhook = params.get('YOUR_APPS_SCRIPT_WEBAPP_URL') || params.get('webhook') || params.get('url');
+      const qsToken   = params.get('REPLACE_WITH_SECRET') || params.get('token')   || params.get('secret');
+
       if (qsWebhook) webhookEl.value = qsWebhook;
       if (qsToken)   tokenEl.value   = qsToken;
 
       // 3) auto-salvare dacă vin prin URL
-      if (qsWebhook || qsToken) saveConfig(false /* no log */);
+      const hadQueryKeys = Boolean(qsWebhook || qsToken);
+      if (hadQueryKeys) {
+        saveConfig(false); // fără mesaj
+
+        // 4) curățare URL: elimină DOAR cheile folosite, păstrează restul parametrilor
+        const keysToRemove = [
+          'YOUR_APPS_SCRIPT_WEBAPP_URL','webhook','url',
+          'REPLACE_WITH_SECRET','token','secret'
+        ];
+        let changed = false;
+        keysToRemove.forEach(k => { if (params.has(k)) { params.delete(k); changed = true; }});
+        if (changed) {
+          const newQs  = params.toString();
+          const newUrl = location.pathname + (newQs ? '?' + newQs : '') + location.hash;
+          // înlocuiește fără reload & fără istoric înapoi
+          history.replaceState(null, '', newUrl);
+        }
+      }
     }
+
     function saveConfig(showMsg=true) {
       localStorage.setItem('scanner_webhook', webhookEl.value.trim());
       localStorage.setItem('scanner_token',   tokenEl.value.trim());
