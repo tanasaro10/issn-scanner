@@ -15,30 +15,15 @@
     input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
     label { font-size: 14px; color: #444; }
   </style>
-
-  <!-- ZXing: primary CDN + fallback -->
-  <script
-    id="zxing-cdn"
-    src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"
-    defer
-    onerror="(function(){ 
-      var s=document.createElement('script'); 
-      s.src='https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js'; 
-      s.defer=true; 
-      s.onload=function(){ window.__zxingReady = true; };
-      document.head.appendChild(s);
-    })()"
-    onload="window.__zxingReady = true;"
-  ></script>
 </head>
 <body>
   <h2>Scanează ISSN → Google Sheet</h2>
 
   <div class="card">
     <div class="row">
-      <button id="startBtn" onclick="window.__start && window.__start()">Start cameră</button>
-      <button id="stopBtn" disabled onclick="window.__stop && window.__stop()">Stop cameră</button>
-      <button id="toggleTorchBtn" disabled onclick="window.__torch && window.__torch()">Torch</button>
+      <button id="startBtn">Start cameră</button>
+      <button id="stopBtn" disabled>Stop cameră</button>
+      <button id="toggleTorchBtn" disabled>Torch</button>
     </div>
     <div style="margin-top:10px">
       <video id="preview" playsinline muted></video>
@@ -70,138 +55,171 @@
   </div>
 
   <script>
-    // — Helper pentru log —
-    function _show(msg, cls='') {
+    // ===== Helpers UI & ISSN =====
+    function log(msg, cls='') {
       const last = document.getElementById('last');
-      if (last) last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
+      last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
+    }
+    function issnFromEan13(ean) {
+      if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
+      const issn7 = ean.substring(3, 10);
+      const variant = ean.substring(10, 12);
+      const weights = [8,7,6,5,4,3,2];
+      let sum = 0; for (let i=0;i<7;i++) sum += (+issn7[i]) * weights[i];
+      const r = sum % 11, cd = (11 - r) % 11, check = (cd === 10) ? 'X' : String(cd);
+      return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
+    }
+    async function lookupTitleByISSN(issn) {
+      try {
+        const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, { headers:{Accept:'application/json'} });
+        if (!r.ok) throw 0; const j = await r.json();
+        return j?.message?.title || j?.message?.publisher || '—';
+      } catch { return '—'; }
+    }
+    async function postToSheet(webhook, token, payload) {
+      try {
+        const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, ...payload }) });
+        const j = await r.json().catch(()=> ({}));
+        return { ok: !!j.ok, info: j.error || '' };
+      } catch(e){ return { ok:false, info: String(e) }; }
     }
 
-    // — Așteaptă să se încarce ZXing —
-    async function waitForZXing(timeoutMs=6000) {
-      const start = Date.now();
-      while (typeof window.ZXingBrowser === 'undefined' && (Date.now() - start) < timeoutMs) {
-        await new Promise(r => setTimeout(r, 100));
-      }
-      return (typeof window.ZXingBrowser !== 'undefined');
+    // ===== Elemente & variabile =====
+    const preview = document.getElementById('preview');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn  = document.getElementById('stopBtn');
+    const torchBtn = document.getElementById('toggleTorchBtn');
+    const webhookEl= document.getElementById('webhook');
+    const tokenEl  = document.getElementById('token');
+    const deviceEl = document.getElementById('deviceId');
+
+    let stream = null;
+    let detector = null;
+    let scanning = false;
+    let lastEan = null, lastAt = 0;
+
+    // ===== Verificări de suport =====
+    function secureOk() {
+      return window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost';
+    }
+    async function ensureBarcodeDetector() {
+      if (!('BarcodeDetector' in window)) return false;
+      try {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        return formats.includes('ean_13') || formats.includes('ean13');
+      } catch { return false; }
     }
 
-    (async function bootstrap(){
-      if (!window.isSecureContext && location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        _show('Pagina nu e pe HTTPS: accesul la cameră poate fi blocat.', 'err');
-      }
-
-      const ok = await waitForZXing();
-      if (!ok) {
-        _show('Nu s-a putut încărca biblioteca ZXing. Verifică dacă nu blochează un ad blocker cdn.jsdelivr.net/unpkg.com.', 'err');
-        // fallback: butoanele doar afișează mesaje
-        window.__start = () => _show('ZXing indisponibil — scanarea codurilor e dezactivată.', 'err');
-        window.__stop  = () => {};
-        window.__torch = () => {};
+    // ===== Cameră / Torch =====
+    async function startCamera() {
+      if (!secureOk()) {
+        log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err');
         return;
       }
-
-      // — Avem ZXing, definim logica —
-      const { BrowserMultiFormatReader } = window.ZXingBrowser;
-      const codeReader = new BrowserMultiFormatReader();
-
-      const preview = document.getElementById('preview');
-      const startBtn = document.getElementById('startBtn');
-      const stopBtn  = document.getElementById('stopBtn');
-      const torchBtn = document.getElementById('toggleTorchBtn');
-      const webhookEl= document.getElementById('webhook');
-      const tokenEl  = document.getElementById('token');
-      const deviceEl = document.getElementById('deviceId');
-
-      let currentCtrl = null, lastEan = null, lastAt = 0;
-
-      function issnFromEan13(ean) {
-        if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
-        const issn7 = ean.substring(3, 10), variant = ean.substring(10, 12);
-        const weights = [8,7,6,5,4,3,2];
-        let sum = 0; for (let i=0;i<7;i++) sum += (+issn7[i]) * weights[i];
-        const r = sum % 11, cd = (11 - r) % 11, check = (cd === 10) ? 'X' : String(cd);
-        return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
-      }
-
-      async function lookupTitleByISSN(issn) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        preview.srcObject = stream;
+        await preview.play();
+        stopBtn.disabled = false;
+        // Torch suport?
         try {
-          const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, { headers:{Accept:'application/json'} });
-          if (!r.ok) throw 0; const j = await r.json();
-          return j?.message?.title || j?.message?.publisher || '—';
-        } catch { return '—'; }
+          const track = stream.getVideoTracks?.()[0];
+          const caps = track?.getCapabilities?.();
+          if (caps && 'torch' in caps) torchBtn.disabled = false;
+        } catch {}
+      } catch(e) {
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') log('Acces la cameră blocat de permisiuni (verifică setările browserului).', 'err');
+        else if (e.name === 'NotFoundError') log('Nu există cameră disponibilă sau e ocupată.', 'err');
+        else log('Eroare pornire cameră: ' + (e.message || e.name), 'err');
       }
+    }
+    function stopCamera() {
+      try { stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
+      stream = null; preview.srcObject = null;
+      scanning = false; stopBtn.disabled = true; torchBtn.disabled = true;
+    }
+    async function toggleTorch() {
+      const track = stream?.getVideoTracks?.()[0];
+      if (!track) return;
+      try {
+        const caps = track.getCapabilities?.(); if (!caps || !('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err');
+        const st = track.getSettings?.()||{};
+        await track.applyConstraints({ advanced:[{ torch: !st.torch }] });
+      } catch (e) { log('Nu pot controla lanterna: ' + e.message, 'err'); }
+    }
 
-      async function postToSheet(webhook, token, payload) {
-        try {
-          const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, ...payload }) });
-          const j = await r.json().catch(()=> ({}));
-          return { ok: !!j.ok, info: j.error || '' };
-        } catch(e){ return { ok:false, info: String(e) }; }
-      }
-
-      async function start() {
-        try {
-          const controls = await codeReader.decodeFromVideoDevice(undefined, preview, async (result, err, controls) => {
-            if (controls && !currentCtrl) currentCtrl = controls;
-            if (!result) return;
-
-            const raw = result.getText().trim();
+    // ===== Scan loop (BarcodeDetector) =====
+    async function scanLoop() {
+      if (!detector || !scanning) return;
+      try {
+        const barcodes = await detector.detect(preview);
+        if (barcodes && barcodes.length) {
+          for (const b of barcodes) {
+            const raw = String(b.rawValue || '').trim();
+            if (!raw) continue;
             const now = Date.now();
-            if (raw === lastEan && (now - lastAt) < 2000) return;
+            if (raw === lastEan && (now - lastAt) < 2000) continue;
             lastEan = raw; lastAt = now;
 
-            if (!/^\d{13}$/.test(raw)) return _show(`Ignorat (nu e EAN-13): ${raw}`);
-            let issn = null, title = '—', variantCode = '';
+            if (!/^\d{13}$/.test(raw)) { log(`Ignorat (nu e EAN-13): ${raw}`); continue; }
 
+            let issn = null, title = '—', variantCode = '';
             if (raw.startsWith('977')) {
               const p = issnFromEan13(raw);
               if (p) { issn = p.issn; variantCode = p.variantCode; title = await lookupTitleByISSN(issn); }
             } else {
-              _show(`Detectat ISBN (${raw}). App-ul e pentru ISSN (977).`, 'err');
+              log(`Detectat ISBN (${raw}). App-ul e pentru ISSN (977).`, 'err');
             }
 
             const webhook = webhookEl.value.trim(), token = tokenEl.value.trim();
-            if (!webhook || !token) return _show(`EAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\n(Configurează Webhook & Token)`, 'err');
-
-            const resp = await postToSheet(webhook, token, { ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() });
-            if (resp.ok) _show(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
-            else _show(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
-          });
-          currentCtrl = controls;
-          startBtn.disabled = true; stopBtn.disabled = false;
-
-          // Torch dacă există
-          try {
-            const track = preview.srcObject?.getVideoTracks?.[0];
-            const caps = track?.getCapabilities?.();
-            if (caps && 'torch' in caps) torchBtn.disabled = false;
-          } catch {}
-        } catch (e) {
-          if (e.name === 'NotAllowedError' || e.name === 'SecurityError') _show('Acces la cameră blocat de permisiuni.', 'err');
-          else if (e.name === 'NotFoundError') _show('Nu există cameră disponibilă.', 'err');
-          else _show('Eroare pornire cameră: ' + (e.message || e.name), 'err');
+            if (!webhook || !token) {
+              log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Webhook & Token)`, 'err');
+              continue;
+            }
+            const resp = await postToSheet(webhook, token, { ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() || '' });
+            if (resp.ok) log(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
+            else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
+          }
         }
+      } catch (e) {
+        // Unele cadre pot da erori; continuăm.
+      } finally {
+        if (scanning) requestAnimationFrame(scanLoop);
       }
+    }
 
-      function stop() {
-        try { currentCtrl?.stop(); } catch {}
-        try { preview.srcObject?.getTracks?.().forEach(t=>t.stop()); preview.srcObject = null; } catch {}
-        startBtn.disabled = false; stopBtn.disabled = true; torchBtn.disabled = true;
+    // ===== Butoane =====
+    startBtn.addEventListener('click', async () => {
+      // pornește camera
+      await startCamera();
+
+      // pregătește detectorul
+      const supported = await ensureBarcodeDetector();
+      if (!supported) {
+        log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err');
+        return;
       }
+      detector = new window.BarcodeDetector({ formats: ['ean_13'] });
+      scanning = true;
+      requestAnimationFrame(scanLoop);
 
-      async function toggleTorch() {
-        const track = preview.srcObject?.getVideoTracks?.[0];
-        if (!track) return;
-        try {
-          const caps = track.getCapabilities?.(); if (!caps || !('torch' in caps)) return _show('Torch nesuportat.', 'err');
-          const st = track.getSettings?.()||{};
-          await track.applyConstraints({ advanced:[{ torch: !st.torch }] });
-        } catch (e) { _show('Nu pot controla lanterna: ' + e.message, 'err'); }
-      }
+      startBtn.disabled = true;
+    });
 
-      // fallback global
-      window.__start = start; window.__stop = stop; window.__torch = toggleTorch;
-    })();
+    stopBtn.addEventListener('click', () => {
+      scanning = false;
+      stopCamera();
+      startBtn.disabled = false;
+    });
+    torchBtn.addEventListener('click', toggleTorch);
+
+    // avertisment dacă nu e HTTPS
+    if (!secureOk()) {
+      log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
+    }
   </script>
 </body>
 </html>
