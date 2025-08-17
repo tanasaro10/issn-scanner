@@ -8,13 +8,9 @@
     :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; }
     body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 14px; background:#fafafa; }
     .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .badge {
-      display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
-      font-weight:600; border:1px solid var(--line); background:#f4fdf7; color:var(--ok);
-    }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; font-weight:600; border:1px solid var(--line); background:#f4fdf7; color:var(--ok); }
     .badge::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block; }
-    .badge.bad { background:#fff4f4; color:var(--warn); }
-    .badge.bad::before { background:var(--warn); }
+    .badge.bad { background:#fff4f4; color:var(--warn); } .badge.bad::before { background:var(--warn); }
 
     .card { background:var(--card); border:1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 14px; }
     .row { display:flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -25,7 +21,6 @@
     .muted { color:var(--muted); font-size:12px; margin-top:6px; }
     .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
     .ok { color: var(--ok); } .err { color: var(--warn); }
-
     details.config summary { cursor:pointer; font-weight:600; }
     details.config[open] summary { margin-bottom:8px; }
     .ghost { opacity:.6 }
@@ -37,20 +32,16 @@
     <span id="cfgBadge" class="badge bad">Config lipsă</span>
   </div>
 
-  <!-- Camera + controale -->
   <div class="card">
     <div class="row">
       <button id="startBtn">Start cameră</button>
       <button id="stopBtn" disabled>Stop cameră</button>
       <button id="toggleTorchBtn" disabled>Torch</button>
     </div>
-    <div style="margin-top:10px">
-      <video id="preview" playsinline muted></video>
-    </div>
+    <div style="margin-top:10px"><video id="preview" playsinline muted></video></div>
     <div class="muted">Dacă nu pornește camera, asigură-te că pagina e pe HTTPS și ai permis accesul.</div>
   </div>
 
-  <!-- Config (opțional – pentru actualizări ulterioare) -->
   <details class="card config" id="cfgPanel">
     <summary>Config (opțional – a actualiza Script ID & Secret)</summary>
     <div class="row">
@@ -83,96 +74,58 @@
   </div>
 
   <script>
-    // ------------- Config & Badge -------------
+    // ========= Config & badge =========
     const BASE_WEBAPP = "https://script.google.com/macros/s/";
     const badge = document.getElementById('cfgBadge');
     const scriptIdEl = document.getElementById('scriptId');
     const secretEl   = document.getElementById('secret');
     const deviceEl   = document.getElementById('deviceId');
 
-    function setBadge(ok) { if (ok) { badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
-    function getCfg() { return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
-    function saveCfg({scriptId, secret, device}) {
-      if (typeof scriptId==='string') localStorage.setItem('scanner_script_id', scriptId.trim());
-      if (typeof secret  ==='string') localStorage.setItem('scanner_secret',   secret.trim());
-      if (typeof device  ==='string') localStorage.setItem('scanner_device',   device.trim());
-      const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret));
-    }
-    function clearCfg() {
-      localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device');
-      scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.', 'ok');
-    }
-    function fillInputsFromStorage() {
-      const {scriptId, secret, device} = getCfg();
-      scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device;
-      setBadge(Boolean(scriptId && secret));
-    }
-    (function loadFromURL(){
-      const p = new URLSearchParams(location.search);
-      const sid = p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||'';
-      const sec = p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||'';
-      let changed=false; if (sid){localStorage.setItem('scanner_script_id',sid); changed=true;} if (sec){localStorage.setItem('scanner_secret',sec); changed=true;}
-      if (changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k));
-        const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); }
-    })();
+    function setBadge(ok){ if(ok){ badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
+    function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
+    function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret)); }
+    function clearCfg(){ localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device'); scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.', 'ok'); }
+    function fillInputsFromStorage(){ const {scriptId,secret,device}=getCfg(); scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device; setBadge(Boolean(scriptId && secret)); }
+    (function loadFromURL(){ const p=new URLSearchParams(location.search); const sid=p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||''; const sec=p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||''; let changed=false; if(sid){localStorage.setItem('scanner_script_id',sid);changed=true;} if(sec){localStorage.setItem('scanner_secret',sec);changed=true;} if(changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k)); const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); } })();
     fillInputsFromStorage();
-    document.getElementById('saveCfgBtn').addEventListener('click', ()=>{ saveCfg({scriptId:scriptIdEl.value, secret:secretEl.value, device:deviceEl.value}); log('Config salvată local.', 'ok'); });
+    document.getElementById('saveCfgBtn').addEventListener('click',()=>{ saveCfg({scriptId:scriptIdEl.value,secret:secretEl.value,device:deviceEl.value}); log('Config salvată local.', 'ok'); });
     document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
 
-    // ------------- Utils UI & Network -------------
+    // ========= Utils =========
     function log(msg, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML; }
     const secureOk = () => (window.isSecureContext || location.protocol==='https:' || location.hostname==='localhost');
     function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
+    async function safeJson(url, opts){ try{ const r=await fetch(url, opts||{}); const status=r.status; if(!r.ok) throw new Error('HTTP '+status); const j=await r.json(); return {ok:true,status,data:j}; } catch(e){ return {ok:false,status:0,data:null,error:String(e)}; } }
 
-    // ------------- Clasificare EAN -------------
+    // ========= Clasificare =========
     function classifyPublication(ean13){
       if (!/^\d{13}$/.test(ean13)) return {type:'other'};
-      if (ean13.startsWith('977')) return {type:'issn'};                 // serial
-      if (ean13.startsWith('978') || ean13.startsWith('979')) return {type:'isbn'}; // carte
+      if (ean13.startsWith('977')) return {type:'issn'};
+      if (ean13.startsWith('978') || ean13.startsWith('979')) return {type:'isbn'};
       return {type:'other'};
     }
 
-    // ------------- Lookup ISSN (Crossref) -------------
+    // ========= ISSN helpers =========
     function issnFromEan13(ean){
       if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
       const issn7 = ean.substring(3,10), variant = ean.substring(10,12);
-      const w=[8,7,6,5,4,3,2]; let s=0; for (let i=0;i<7;i++) s += (+issn7[i])*w[i];
+      const w=[8,7,6,5,4,3,2]; let s=0; for(let i=0;i<7;i++) s += (+issn7[i])*w[i];
       const r=s%11, cd=(11-r)%11, check=(cd===10)?'X':String(cd);
       return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
     }
-    const titleCache = new Map();
 
-    async function lookupISSNDetails(issn){
-      const key='issn:'+issn; if (titleCache.has(key)) return titleCache.get(key);
-      try{
-        const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, {headers:{Accept:'application/json'}});
-        if (!r.ok) throw 0; const j=await r.json();
-        const out = {
-          title: j?.message?.title || '—',
-          publisher: j?.message?.publisher || '',
-          source: 'crossref'
-        };
-        titleCache.set(key,out); return out;
-      } catch { const out={title:'—',publisher:'',source:'crossref'}; titleCache.set(key,out); return out; }
-    }
+    // ========= Lookup ISBN (OL exact → OL search → Google Books) =========
+    const cache = new Map();
 
-    // ------------- Lookup ISBN (Open Library → Google Books fallback) -------------
     async function fetchOpenLibraryISBN(isbn13){
-      // returns minimal fields; may need extra fetch for authors' names
-      const r = await fetch(`https://openlibrary.org/isbn/${isbn13}.json`, {headers:{Accept:'application/json'}});
-      if (!r.ok) throw 0; const j = await r.json();
-      let authors = [];
+      const a = await safeJson(`https://openlibrary.org/isbn/${isbn13}.json`, {headers:{Accept:'application/json'}});
+      if (!a.ok) throw new Error('OL ISBN not found');
+      const j=a.data;
+      let authors=[];
       if (Array.isArray(j.authors) && j.authors.length){
-        // try resolve up to 3 author names
-        const toFetch = j.authors.slice(0,3).map(a=>a.key).filter(Boolean);
-        try{
-          const names = await Promise.all(toFetch.map(async key=>{
-            const rr = await fetch(`https://openlibrary.org${key}.json`, {headers:{Accept:'application/json'}});
-            if (!rr.ok) return ''; const jj = await rr.json();
-            return jj?.name || '';
-          }));
-          authors = names.filter(Boolean);
-        }catch{}
+        const keys=j.authors.slice(0,3).map(a=>a.key).filter(Boolean);
+        const names=await Promise.all(keys.map(async k=>{ const rr=await safeJson(`https://openlibrary.org${k}.json`,{headers:{Accept:'application/json'}}); return rr.ok ? (rr.data?.name||'') : ''; }));
+        authors = names.filter(Boolean);
       }
       return {
         title: j.title || j.by_statement || '—',
@@ -188,11 +141,31 @@
       };
     }
 
+    async function fetchOpenLibrarySearch(isbn13){
+      const s = await safeJson(`https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn13)}`, {headers:{Accept:'application/json'}});
+      if (!s.ok) throw new Error('OL search failed');
+      const d = s.data;
+      const doc = (d && Array.isArray(d.docs) && d.docs[0]) ? d.docs[0] : null;
+      if (!doc) throw new Error('OL search empty');
+      return {
+        title: doc.title || '—',
+        subtitle: doc.subtitle || '',
+        authors: Array.isArray(doc.author_name) ? doc.author_name : [],
+        publisher: Array.isArray(doc.publisher) ? doc.publisher.slice(0,3).join(', ') : (doc.publisher||''),
+        publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : (doc.publish_date && doc.publish_date[0]) || '',
+        pages: doc.number_of_pages_median || '',
+        language: Array.isArray(doc.language) ? doc.language.join(',') : '',
+        categories: Array.isArray(doc.subject) ? doc.subject.slice(0,5).join(', ') : '',
+        cover: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : '',
+        source: 'openlibrary_search'
+      };
+    }
+
     async function fetchGoogleBooksISBN(isbn13){
-      const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn13}`, {headers:{Accept:'application/json'}});
-      if (!r.ok) throw 0; const j = await r.json();
-      const item = (j.items && j.items[0]) || null; if (!item) throw 0;
-      const v = item.volumeInfo || {};
+      const g = await safeJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn13)}`, {headers:{Accept:'application/json'}});
+      if (!g.ok) throw new Error('GB not found');
+      const item = (g.data.items && g.data.items[0]) || null; if (!item) throw new Error('GB empty');
+      const v=item.volumeInfo||{};
       return {
         title: v.title || '—',
         subtitle: v.subtitle || '',
@@ -210,41 +183,50 @@
     }
 
     async function lookupISBNDetails(isbn13){
-      const key='isbn:'+isbn13; if (titleCache.has(key)) return titleCache.get(key);
-      // Try Open Library, then Google Books
-      try {
-        const a = await fetchOpenLibraryISBN(isbn13);
-        if (a && a.title && a.title !== '—') { titleCache.set(key,a); return a; }
-      } catch {}
-      try {
-        const b = await fetchGoogleBooksISBN(isbn13);
-        titleCache.set(key,b); return b;
-      } catch {}
+      const key='isbn:'+isbn13; if (cache.has(key)) return cache.get(key);
+      try { const a=await fetchOpenLibraryISBN(isbn13); cache.set(key,a); return a; } catch{}
+      try { const b=await fetchOpenLibrarySearch(isbn13); cache.set(key,b); return b; } catch{}
+      try { const c=await fetchGoogleBooksISBN(isbn13); cache.set(key,c); return c; } catch{}
       const out={ title:'—', authors:[], publisher:'', publishedDate:'', pages:'', language:'', categories:'', cover:'', source:'none' };
-      titleCache.set(key,out); return out;
+      cache.set(key,out); return out;
     }
 
-    // ------------- POST către Sheet (JSON → x-www-form-urlencoded fallback) -------------
+    // ========= Lookup ISSN (Crossref /journals → /works) =========
+    async function lookupISSNDetails(issn){
+      const key='issn:'+issn; if (cache.has(key)) return cache.get(key);
+      // 1) încercă /journals/{issn}
+      const j = await safeJson(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, {headers:{Accept:'application/json'}});
+      if (j.ok){
+        const out = { title: j.data?.message?.title || '—', publisher: j.data?.message?.publisher || '', source:'crossref_journals' };
+        cache.set(key,out); return out;
+      }
+      // 2) fallback: /works?filter=issn:{issn}&rows=1
+      const w = await safeJson(`https://api.crossref.org/works?filter=issn:${encodeURIComponent(issn)}&rows=1`, {headers:{Accept:'application/json'}});
+      if (w.ok){
+        const m = w.data?.message?.items?.[0] || {};
+        const out = { title: (Array.isArray(m['container-title']) && m['container-title'][0]) || '—', publisher: m.publisher || '', source:'crossref_works' };
+        cache.set(key,out); return out;
+      }
+      const out={ title:'—', publisher:'', source:'crossref_none' }; cache.set(key,out); return out;
+    }
+
+    // ========= POST către Sheet =========
     async function postToSheet(payload){
       const {secret, device} = getCfg(); const webhook = buildWebhook();
       if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
-
-      // 1) JSON
       try{
         const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token:secret, deviceId: device||'', ...payload }) });
         const j = await r.json().catch(()=>({})); return { ok: !!j.ok, info: j.error||'' };
       }catch(e1){
-        // 2) x-www-form-urlencoded
         try{
-          const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||'');
-          Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
+          const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
           const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
           const j2 = await r2.json().catch(()=>({})); return { ok: !!j2.ok, info: j2.error||'' };
         }catch(e2){ return { ok:false, info:String(e2) }; }
       }
     }
 
-    // ------------- Cameră + BarcodeDetector -------------
+    // ========= Cameră + BarcodeDetector =========
     const preview = document.getElementById('preview');
     const startBtn = document.getElementById('startBtn');
     const stopBtn  = document.getElementById('stopBtn');
@@ -253,10 +235,7 @@
     let stream=null, detector=null, scanning=false;
     let lastEan=null, lastAt=0;
 
-    async function ensureBarcodeDetector(){
-      if (!('BarcodeDetector' in window)) return false;
-      try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; }
-    }
+    async function ensureBarcodeDetector(){ if (!('BarcodeDetector' in window)) return false; try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; } }
     async function startCamera(){
       if (!secureOk()) { log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
       try{
@@ -270,11 +249,7 @@
       }
     }
     function stopCamera(){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; torchBtn.disabled=true; }
-    async function toggleTorch(){
-      const track = stream?.getVideoTracks?.()[0]; if (!track) return;
-      try{ const caps=track.getCapabilities?.(); if (!caps || !('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err');
-        const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ log('Nu pot controla lanterna: '+e.message, 'err'); }
-    }
+    async function toggleTorch(){ const track=stream?.getVideoTracks?.()[0]; if(!track) return; try{ const caps=track.getCapabilities?.(); if(!caps||!('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err'); const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ log('Nu pot controla lanterna: '+e.message, 'err'); } }
 
     async function scanLoop(){
       if (!detector || !scanning) return;
@@ -293,7 +268,14 @@
 
             if (cls.type==='issn'){
               const p = issnFromEan13(raw);
-              if (p){ payload.issn=p.issn; payload.variantCode=p.variantCode; const det=await lookupISSNDetails(p.issn); payload.title=det.title; payload.publisher=det.publisher; payload.source=det.source; }
+              if (p){
+                payload.issn=p.issn; payload.variantCode=p.variantCode;
+                const det=await lookupISSNDetails(p.issn);
+                payload.title=det.title; payload.publisher=det.publisher; payload.source=det.source;
+                log(`ISSN ${p.issn} → titlu din ${det.source}`, 'ok');
+              } else {
+                log(`ISSN derivat invalid din EAN: ${raw}`, 'err');
+              }
             } else if (cls.type==='isbn'){
               payload.isbn = raw;
               const det = await lookupISBNDetails(raw);
@@ -307,26 +289,24 @@
               payload.categories = det.categories || '';
               payload.cover = det.cover || '';
               payload.source = det.source || '';
-              // Optional: payload.googleVolumeId / payload.previewLink dacă vrei în Sheet (adaugă-le jos în postToSheet + Apps Script)
-              if (det.googleVolumeId) payload.googleVolumeId = det.googleVolumeId;
-              if (det.previewLink)    payload.previewLink    = det.previewLink;
+              log(`ISBN ${raw} → titlu din ${payload.source}`, payload.title && payload.title!=='—' ? 'ok' : 'err');
             }
 
             const webhook = buildWebhook(); const {secret}=getCfg();
             if (!webhook || !secret){
-              log(`EAN: ${raw}\nTip: ${cls.type.toUpperCase()}\nTitlu: ${payload.title}\n(Configurează Script ID & Secret – vezi secțiunea Config sau setează din URL)`, 'err');
+              log(`Fără config: setează Script ID & Secret (URL o singură dată: ?SCRIPT_ID=&SECRET=)`, 'err');
               continue;
             }
 
             const resp = await postToSheet(payload);
             if (resp.ok){
-              log(`✔ Salvat [${cls.type.toUpperCase()}]\nEAN: ${raw}\n${payload.issn?('ISSN: '+payload.issn+'\n'):''}${payload.isbn?('ISBN: '+payload.isbn+'\n'):''}Titlu: ${payload.title}${payload.authors?('\nAutori: '+payload.authors):''}${payload.publisher?('\nEditura: '+payload.publisher):''}${payload.publishedDate?('\nData: '+payload.publishedDate):''}${payload.variantCode?('\nVariant: '+payload.variantCode):''}`, 'ok');
+              log(`✔ Salvat [${cls.type.toUpperCase()}]\nTitlu: ${payload.title || '—'}`, 'ok');
             } else {
               log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
             }
           }
         }
-      }catch(e){ /* ignorăm erorile izolate */ }
+      }catch(e){ /* ignorăm erori sporadice de detectare */ }
       finally { if (scanning) requestAnimationFrame(scanLoop); }
     }
 
