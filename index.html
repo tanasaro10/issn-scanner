@@ -50,22 +50,22 @@
     <div class="muted">Dacă nu pornește camera, asigură-te că pagina e pe HTTPS și ai permis accesul.</div>
   </div>
 
-  <!-- Config (ascuns, pentru actualizări ulterioare) -->
+  <!-- Config (opțional – pentru actualizări ulterioare) -->
   <details class="card config" id="cfgPanel">
-    <summary>Config (opțional – pentru a actualiza Script ID & Secret)</summary>
+    <summary>Config (opțional – a actualiza Script ID & Secret)</summary>
     <div class="row">
       <div style="flex:1; min-width:260px">
         <label>Google Script ID</label>
         <input id="scriptId" type="text" placeholder="AKfycbx..." />
-        <div class="muted ghost">Webhook-ul: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
+        <div class="muted ghost">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
       </div>
       <div style="flex:1; min-width:220px">
         <label>Secret (Token)</label>
         <input id="secret" type="password" placeholder="••••••" />
       </div>
       <div style="display:flex; gap:8px; align-items:flex-end">
-        <button id="saveCfgBtn" title="Salvează în browser (localStorage)">Salvează</button>
-        <button id="clearCfgBtn" title="Șterge din browser">Șterge</button>
+        <button id="saveCfgBtn">Salvează</button>
+        <button id="clearCfgBtn">Șterge</button>
       </div>
     </div>
     <div class="row" style="margin-top:8px">
@@ -74,7 +74,7 @@
         <input id="deviceId" type="text" placeholder="ex. phone01" />
       </div>
     </div>
-    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează și sunt eliminate din URL.</div>
+    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code>. Valorile se salvează local și sunt eliminate din URL.</div>
   </details>
 
   <div class="card">
@@ -83,268 +83,256 @@
   </div>
 
   <script>
-    // ============== Config & Badge ==============
+    // ------------- Config & Badge -------------
     const BASE_WEBAPP = "https://script.google.com/macros/s/";
     const badge = document.getElementById('cfgBadge');
     const scriptIdEl = document.getElementById('scriptId');
     const secretEl   = document.getElementById('secret');
     const deviceEl   = document.getElementById('deviceId');
 
-    function setBadge(ok) {
-      if (ok) { badge.textContent = 'Config OK'; badge.classList.remove('bad'); }
-      else    { badge.textContent = 'Config lipsă'; badge.classList.add('bad'); }
-    }
-    function getCfg() {
-      return {
-        scriptId: localStorage.getItem('scanner_script_id') || '',
-        secret:   localStorage.getItem('scanner_secret')    || '',
-        device:   localStorage.getItem('scanner_device')    || ''
-      };
-    }
+    function setBadge(ok) { if (ok) { badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
+    function getCfg() { return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
     function saveCfg({scriptId, secret, device}) {
-      if (typeof scriptId === 'string') localStorage.setItem('scanner_script_id', scriptId.trim());
-      if (typeof secret   === 'string') localStorage.setItem('scanner_secret',   secret.trim());
-      if (typeof device   === 'string') localStorage.setItem('scanner_device',   device.trim());
-      const cfg = getCfg();
-      setBadge(Boolean(cfg.scriptId && cfg.secret));
+      if (typeof scriptId==='string') localStorage.setItem('scanner_script_id', scriptId.trim());
+      if (typeof secret  ==='string') localStorage.setItem('scanner_secret',   secret.trim());
+      if (typeof device  ==='string') localStorage.setItem('scanner_device',   device.trim());
+      const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret));
     }
     function clearCfg() {
-      localStorage.removeItem('scanner_script_id');
-      localStorage.removeItem('scanner_secret');
-      localStorage.removeItem('scanner_device');
-      scriptIdEl.value=''; secretEl.value=''; deviceEl.value='';
-      setBadge(false);
-      log('Config ștearsă.', 'ok');
+      localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device');
+      scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.', 'ok');
     }
     function fillInputsFromStorage() {
       const {scriptId, secret, device} = getCfg();
-      scriptIdEl.value = scriptId;
-      secretEl.value   = secret;
-      deviceEl.value   = device;
+      scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device;
       setBadge(Boolean(scriptId && secret));
     }
-
-    // Preluare din URL + curățare parametri
     (function loadFromURL(){
-      const params = new URLSearchParams(location.search);
-      const sid = params.get('SCRIPT_ID') || params.get('scriptId') || params.get('sid') || params.get('SID') || '';
-      const sec = params.get('SECRET')    || params.get('secret')   || params.get('token') || params.get('TOKEN') || '';
-      let changed = false;
-      if (sid) { localStorage.setItem('scanner_script_id', sid); changed = true; }
-      if (sec) { localStorage.setItem('scanner_secret',   sec); changed = true; }
-      if (changed) {
-        ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k => params.delete(k));
-        const newQs  = params.toString();
-        const newUrl = location.pathname + (newQs ? '?' + newQs : '') + location.hash;
-        history.replaceState(null, '', newUrl);
-      }
+      const p = new URLSearchParams(location.search);
+      const sid = p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||'';
+      const sec = p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||'';
+      let changed=false; if (sid){localStorage.setItem('scanner_script_id',sid); changed=true;} if (sec){localStorage.setItem('scanner_secret',sec); changed=true;}
+      if (changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k));
+        const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); }
     })();
-
     fillInputsFromStorage();
-    document.getElementById('saveCfgBtn').addEventListener('click', () => { saveCfg({scriptId: scriptIdEl.value, secret: secretEl.value, device: deviceEl.value}); log('Config salvată local.', 'ok'); });
+    document.getElementById('saveCfgBtn').addEventListener('click', ()=>{ saveCfg({scriptId:scriptIdEl.value, secret:secretEl.value, device:deviceEl.value}); log('Config salvată local.', 'ok'); });
     document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
 
-    // ============== Utilități UI & rețea ==============
-    function log(msg, cls='') {
-      const last = document.getElementById('last');
-      last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
-    }
-    const secureOk = () => (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
-    function buildWebhook() {
-      const {scriptId} = getCfg();
-      return scriptId ? (BASE_WEBAPP + scriptId + "/exec") : '';
+    // ------------- Utils UI & Network -------------
+    function log(msg, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML; }
+    const secureOk = () => (window.isSecureContext || location.protocol==='https:' || location.hostname==='localhost');
+    function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
+
+    // ------------- Clasificare EAN -------------
+    function classifyPublication(ean13){
+      if (!/^\d{13}$/.test(ean13)) return {type:'other'};
+      if (ean13.startsWith('977')) return {type:'issn'};                 // serial
+      if (ean13.startsWith('978') || ean13.startsWith('979')) return {type:'isbn'}; // carte
+      return {type:'other'};
     }
 
-    // ============== Clasificare EAN & lookup titluri ==============
-    function classifyPublication(ean13) {
-      if (!/^\d{13}$/.test(ean13)) return { type:'other' };
-      if (ean13.startsWith('977')) return { type:'issn' };                 // seriale
-      if (ean13.startsWith('978') || ean13.startsWith('979')) return { type:'isbn' }; // cărți
-      return { type:'other' };
-    }
-
-    function issnFromEan13(ean) {
+    // ------------- Lookup ISSN (Crossref) -------------
+    function issnFromEan13(ean){
       if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
-      const issn7 = ean.substring(3, 10);
-      const variant = ean.substring(10, 12);
-      const weights = [8,7,6,5,4,3,2];
-      let sum = 0; for (let i=0;i<7;i++) sum += (+issn7[i]) * weights[i];
-      const r = sum % 11, cd = (11 - r) % 11, check = (cd === 10) ? 'X' : String(cd);
+      const issn7 = ean.substring(3,10), variant = ean.substring(10,12);
+      const w=[8,7,6,5,4,3,2]; let s=0; for (let i=0;i<7;i++) s += (+issn7[i])*w[i];
+      const r=s%11, cd=(11-r)%11, check=(cd===10)?'X':String(cd);
       return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
     }
+    const titleCache = new Map();
 
-    const titleCache = new Map(); // mic cache în memorie
-
-    async function lookupTitleByISSN(issn) {
-      const key = 'issn:'+issn;
-      if (titleCache.has(key)) return titleCache.get(key);
-      try {
-        const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, { headers:{Accept:'application/json'} });
-        if (!r.ok) throw 0; const j = await r.json();
-        const t = j?.message?.title || j?.message?.publisher || '—';
-        titleCache.set(key, t); return t;
-      } catch { titleCache.set(key, '—'); return '—'; }
+    async function lookupISSNDetails(issn){
+      const key='issn:'+issn; if (titleCache.has(key)) return titleCache.get(key);
+      try{
+        const r = await fetch(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`, {headers:{Accept:'application/json'}});
+        if (!r.ok) throw 0; const j=await r.json();
+        const out = {
+          title: j?.message?.title || '—',
+          publisher: j?.message?.publisher || '',
+          source: 'crossref'
+        };
+        titleCache.set(key,out); return out;
+      } catch { const out={title:'—',publisher:'',source:'crossref'}; titleCache.set(key,out); return out; }
     }
 
-    async function lookupTitleByISBN(isbn13) {
-      const key = 'isbn:'+isbn13;
-      if (titleCache.has(key)) return titleCache.get(key);
-      try {
-        const r = await fetch(`https://openlibrary.org/isbn/${isbn13}.json`, { headers:{Accept:'application/json'} });
-        if (!r.ok) throw 0;
-        const j = await r.json();
-        const t = j?.title || '—';
-        titleCache.set(key, t); return t;
-      } catch { titleCache.set(key, '—'); return '—'; }
+    // ------------- Lookup ISBN (Open Library → Google Books fallback) -------------
+    async function fetchOpenLibraryISBN(isbn13){
+      // returns minimal fields; may need extra fetch for authors' names
+      const r = await fetch(`https://openlibrary.org/isbn/${isbn13}.json`, {headers:{Accept:'application/json'}});
+      if (!r.ok) throw 0; const j = await r.json();
+      let authors = [];
+      if (Array.isArray(j.authors) && j.authors.length){
+        // try resolve up to 3 author names
+        const toFetch = j.authors.slice(0,3).map(a=>a.key).filter(Boolean);
+        try{
+          const names = await Promise.all(toFetch.map(async key=>{
+            const rr = await fetch(`https://openlibrary.org${key}.json`, {headers:{Accept:'application/json'}});
+            if (!rr.ok) return ''; const jj = await rr.json();
+            return jj?.name || '';
+          }));
+          authors = names.filter(Boolean);
+        }catch{}
+      }
+      return {
+        title: j.title || j.by_statement || '—',
+        subtitle: j.subtitle || '',
+        authors,
+        publisher: Array.isArray(j.publishers)? j.publishers.join(', ') : (j.publishers||''),
+        publishedDate: j.publish_date || '',
+        pages: j.number_of_pages || '',
+        language: Array.isArray(j.languages)? j.languages.map(l=>l?.key?.split('/').pop()).join(','): '',
+        categories: Array.isArray(j.subjects)? j.subjects.slice(0,5).join(', ') : '',
+        cover: (j.covers && j.covers.length) ? `https://covers.openlibrary.org/b/id/${j.covers[0]}-M.jpg` : '',
+        source: 'openlibrary'
+      };
     }
 
-    // ===== POST cu fallback anti-CORS =====
-    async function postToSheet(payload) {
-      const {secret, device} = getCfg();
-      const webhook = buildWebhook();
+    async function fetchGoogleBooksISBN(isbn13){
+      const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn13}`, {headers:{Accept:'application/json'}});
+      if (!r.ok) throw 0; const j = await r.json();
+      const item = (j.items && j.items[0]) || null; if (!item) throw 0;
+      const v = item.volumeInfo || {};
+      return {
+        title: v.title || '—',
+        subtitle: v.subtitle || '',
+        authors: Array.isArray(v.authors) ? v.authors : [],
+        publisher: v.publisher || '',
+        publishedDate: v.publishedDate || '',
+        pages: v.pageCount || '',
+        language: v.language || '',
+        categories: Array.isArray(v.categories) ? v.categories.join(', ') : '',
+        cover: v.imageLinks?.thumbnail || '',
+        googleVolumeId: item.id || '',
+        previewLink: v.previewLink || v.infoLink || '',
+        source: 'googlebooks'
+      };
+    }
+
+    async function lookupISBNDetails(isbn13){
+      const key='isbn:'+isbn13; if (titleCache.has(key)) return titleCache.get(key);
+      // Try Open Library, then Google Books
+      try {
+        const a = await fetchOpenLibraryISBN(isbn13);
+        if (a && a.title && a.title !== '—') { titleCache.set(key,a); return a; }
+      } catch {}
+      try {
+        const b = await fetchGoogleBooksISBN(isbn13);
+        titleCache.set(key,b); return b;
+      } catch {}
+      const out={ title:'—', authors:[], publisher:'', publishedDate:'', pages:'', language:'', categories:'', cover:'', source:'none' };
+      titleCache.set(key,out); return out;
+    }
+
+    // ------------- POST către Sheet (JSON → x-www-form-urlencoded fallback) -------------
+    async function postToSheet(payload){
+      const {secret, device} = getCfg(); const webhook = buildWebhook();
       if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
 
       // 1) JSON
-      try {
-        const r = await fetch(webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: secret, deviceId: device || '', ...payload })
-        });
-        const j = await r.json().catch(()=> ({}));
-        return { ok: !!j.ok, info: j.error || '' };
-      } catch(e1) {
+      try{
+        const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token:secret, deviceId: device||'', ...payload }) });
+        const j = await r.json().catch(()=>({})); return { ok: !!j.ok, info: j.error||'' };
+      }catch(e1){
         // 2) x-www-form-urlencoded
-        try {
-          const form = new URLSearchParams();
-          form.set('token', secret);
-          form.set('deviceId', device || '');
-          Object.entries(payload).forEach(([k,v]) => form.set(k, v ?? ''));
-          const r2 = await fetch(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: form.toString()
-          });
-          const j2 = await r2.json().catch(()=> ({}));
-          return { ok: !!j2.ok, info: j2.error || '' };
-        } catch(e2) {
-          return { ok:false, info: String(e2) };
-        }
+        try{
+          const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||'');
+          Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'': (Array.isArray(v)? v.join(', '): String(v))));
+          const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+          const j2 = await r2.json().catch(()=>({})); return { ok: !!j2.ok, info: j2.error||'' };
+        }catch(e2){ return { ok:false, info:String(e2) }; }
       }
     }
 
-    // ============== Cameră + BarcodeDetector ==============
+    // ------------- Cameră + BarcodeDetector -------------
     const preview = document.getElementById('preview');
     const startBtn = document.getElementById('startBtn');
     const stopBtn  = document.getElementById('stopBtn');
     const torchBtn = document.getElementById('toggleTorchBtn');
 
-    let stream = null, detector = null, scanning = false;
-    let lastEan = null, lastAt = 0;
+    let stream=null, detector=null, scanning=false;
+    let lastEan=null, lastAt=0;
 
-    async function ensureBarcodeDetector() {
+    async function ensureBarcodeDetector(){
       if (!('BarcodeDetector' in window)) return false;
-      try {
-        const formats = await window.BarcodeDetector.getSupportedFormats();
-        return formats.includes('ean_13') || formats.includes('ean13');
-      } catch { return false; }
+      try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; }
     }
-    async function startCamera() {
+    async function startCamera(){
       if (!secureOk()) { log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false
-        });
-        preview.srcObject = stream; await preview.play();
-        stopBtn.disabled = false;
-        try {
-          const track = stream.getVideoTracks?.()[0];
-          const caps = track?.getCapabilities?.();
-          if (caps && 'torch' in caps) torchBtn.disabled = false;
-        } catch {}
-      } catch(e) {
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') log('Acces la cameră blocat de permisiuni.', 'err');
-        else if (e.name === 'NotFoundError') log('Nu există cameră disponibilă sau e ocupată.', 'err');
-        else log('Eroare pornire cameră: ' + (e.message || e.name), 'err');
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:{ideal:'environment'}}, audio:false });
+        preview.srcObject=stream; await preview.play(); stopBtn.disabled=false;
+        try{ const track=stream.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); if (caps && 'torch' in caps) torchBtn.disabled=false; }catch{}
+      }catch(e){
+        if (e.name==='NotAllowedError'||e.name==='SecurityError') log('Acces la cameră blocat de permisiuni.', 'err');
+        else if (e.name==='NotFoundError') log('Nu există cameră disponibilă sau e ocupată.', 'err');
+        else log('Eroare pornire cameră: '+(e.message||e.name), 'err');
       }
     }
-    function stopCamera() {
-      try { stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
-      stream = null; preview.srcObject = null;
-      scanning = false; stopBtn.disabled = true; torchBtn.disabled = true;
-    }
-    async function toggleTorch() {
-      const track = stream?.getVideoTracks?.()[0];
-      if (!track) return;
-      try {
-        const caps = track.getCapabilities?.(); if (!caps || !('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err');
-        const st = track.getSettings?.()||{};
-        await track.applyConstraints({ advanced:[{ torch: !st.torch }] });
-      } catch (e) { log('Nu pot controla lanterna: ' + e.message, 'err'); }
+    function stopCamera(){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; torchBtn.disabled=true; }
+    async function toggleTorch(){
+      const track = stream?.getVideoTracks?.()[0]; if (!track) return;
+      try{ const caps=track.getCapabilities?.(); if (!caps || !('torch' in caps)) return log('Torch nesuportat pe acest device.', 'err');
+        const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ log('Nu pot controla lanterna: '+e.message, 'err'); }
     }
 
-    async function scanLoop() {
+    async function scanLoop(){
       if (!detector || !scanning) return;
-      try {
+      try{
         const barcodes = await detector.detect(preview);
-        if (barcodes && barcodes.length) {
-          for (const b of barcodes) {
-            const raw = String(b.rawValue || '').trim();
-            if (!raw) continue;
-            const now = Date.now();
-            if (raw === lastEan && (now - lastAt) < 2000) continue;
-            lastEan = raw; lastAt = now;
+        if (barcodes && barcodes.length){
+          for (const b of barcodes){
+            const raw = String(b.rawValue||'').trim(); if (!raw) continue;
+            const now=Date.now(); if (raw===lastEan && (now-lastAt)<2000) continue;
+            lastEan=raw; lastAt=now;
 
             const cls = classifyPublication(raw);
-            if (cls.type === 'other') { log(`Detectat GTIN-13 non-publicație: ${raw} (ignorat)`, 'err'); continue; }
+            if (cls.type==='other'){ log(`Detectat GTIN-13 non-publicație: ${raw} (ignorat)`, 'err'); continue; }
 
-            let title = '—', issn = null, variantCode = null, isbn = null;
-            if (cls.type === 'issn') {
+            let payload = { type: cls.type, ean: raw, issn:'', isbn:'', title:'—', authors:'', publisher:'', publishedDate:'', pages:'', language:'', categories:'', subtitle:'', cover:'', source:'', variantCode:'' };
+
+            if (cls.type==='issn'){
               const p = issnFromEan13(raw);
-              if (p) { issn = p.issn; variantCode = p.variantCode; title = await lookupTitleByISSN(issn); }
-            } else if (cls.type === 'isbn') {
-              isbn = raw;
-              title = await lookupTitleByISBN(isbn);
+              if (p){ payload.issn=p.issn; payload.variantCode=p.variantCode; const det=await lookupISSNDetails(p.issn); payload.title=det.title; payload.publisher=det.publisher; payload.source=det.source; }
+            } else if (cls.type==='isbn'){
+              payload.isbn = raw;
+              const det = await lookupISBNDetails(raw);
+              payload.title = det.title || '—';
+              payload.subtitle = det.subtitle || '';
+              payload.authors = Array.isArray(det.authors)? det.authors.join(', ') : (det.authors||'');
+              payload.publisher = det.publisher || '';
+              payload.publishedDate = det.publishedDate || '';
+              payload.pages = det.pages || '';
+              payload.language = det.language || '';
+              payload.categories = det.categories || '';
+              payload.cover = det.cover || '';
+              payload.source = det.source || '';
+              // Optional: payload.googleVolumeId / payload.previewLink dacă vrei în Sheet (adaugă-le jos în postToSheet + Apps Script)
+              if (det.googleVolumeId) payload.googleVolumeId = det.googleVolumeId;
+              if (det.previewLink)    payload.previewLink    = det.previewLink;
             }
 
-            const webhook = buildWebhook();
-            const {secret} = getCfg();
-            if (!webhook || !secret) {
-              log(`EAN: ${raw}\nTip: ${cls.type.toUpperCase()}\nTitlu: ${title}\n(Configurează Script ID & Secret – vezi secțiunea Config sau setează din URL)`, 'err');
+            const webhook = buildWebhook(); const {secret}=getCfg();
+            if (!webhook || !secret){
+              log(`EAN: ${raw}\nTip: ${cls.type.toUpperCase()}\nTitlu: ${payload.title}\n(Configurează Script ID & Secret – vezi secțiunea Config sau setează din URL)`, 'err');
               continue;
             }
 
-            const payload = {
-              type: cls.type, ean: raw,
-              issn: issn || '', isbn: isbn || '',
-              title, variantCode: variantCode || ''
-            };
             const resp = await postToSheet(payload);
-            if (resp.ok) {
-              log(`✔ Salvat [${cls.type.toUpperCase()}]\nEAN: ${raw}\n${issn?('ISSN: '+issn+'\n'):''}${isbn?('ISBN: '+isbn+'\n'):''}Titlu: ${title}${variantCode?('\nVariant: '+variantCode):''}`, 'ok');
+            if (resp.ok){
+              log(`✔ Salvat [${cls.type.toUpperCase()}]\nEAN: ${raw}\n${payload.issn?('ISSN: '+payload.issn+'\n'):''}${payload.isbn?('ISBN: '+payload.isbn+'\n'):''}Titlu: ${payload.title}${payload.authors?('\nAutori: '+payload.authors):''}${payload.publisher?('\nEditura: '+payload.publisher):''}${payload.publishedDate?('\nData: '+payload.publishedDate):''}${payload.variantCode?('\nVariant: '+payload.variantCode):''}`, 'ok');
             } else {
               log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
             }
           }
         }
-      } catch(e) {
-        // erori izolate la detectare — ignorăm
-      } finally {
-        if (scanning) requestAnimationFrame(scanLoop);
-      }
+      }catch(e){ /* ignorăm erorile izolate */ }
+      finally { if (scanning) requestAnimationFrame(scanLoop); }
     }
 
-    // Legare butoane
-    startBtn.addEventListener('click', async () => {
-      await startCamera();
-      const supported = await ensureBarcodeDetector();
-      if (!supported) { log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err'); return; }
-      detector = new window.BarcodeDetector({ formats: ['ean_13'] });
-      scanning = true; requestAnimationFrame(scanLoop);
-      startBtn.disabled = true;
-    });
-    stopBtn.addEventListener('click', () => { scanning = false; stopCamera(); startBtn.disabled = false; });
+    // Butoane
+    startBtn.addEventListener('click', async ()=>{ await startCamera(); const supported=await ensureBarcodeDetector(); if (!supported){ log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err'); return; } detector=new window.BarcodeDetector({formats:['ean_13']}); scanning=true; requestAnimationFrame(scanLoop); startBtn.disabled=true; });
+    stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); startBtn.disabled=false; });
     torchBtn.addEventListener('click', toggleTorch);
 
     if (!secureOk()) log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
