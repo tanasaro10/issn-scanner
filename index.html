@@ -14,6 +14,7 @@
     .ok { color: #0a7a0a; } .err { color: #b00020; }
     input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
     label { font-size: 14px; color: #444; }
+    .muted { color:#666; font-size:12px; margin-top:6px; }
   </style>
 </head>
 <body>
@@ -36,7 +37,7 @@
         <label>Endpoint Apps Script</label>
         <input id="webhook" type="text" placeholder="YOUR_APPS_SCRIPT_WEBAPP_URL" />
       </div>
-      <div style="flex-basis:200px">
+      <div style="flex-basis:220px">
         <label>Token</label>
         <input id="token" type="text" placeholder="REPLACE_WITH_SECRET" />
       </div>
@@ -46,7 +47,12 @@
         <label>Device ID (opțional)</label>
         <input id="deviceId" type="text" placeholder="ex. phone01" />
       </div>
+      <div>
+        <button id="saveCfgBtn" title="Salvează în browser (localStorage)">Salvează</button>
+        <button id="clearCfgBtn" title="Șterge din browser">Șterge</button>
+      </div>
     </div>
+    <div class="muted">Poți trece valorile direct în URL: <code>?YOUR_APPS_SCRIPT_WEBAPP_URL=&amp;REPLACE_WITH_SECRET=</code>. Vor fi salvate automat local.</div>
   </div>
 
   <div class="card">
@@ -55,11 +61,55 @@
   </div>
 
   <script>
-    // ===== Helpers UI & ISSN =====
+    // ===== Utils UI =====
     function log(msg, cls='') {
       const last = document.getElementById('last');
       last.innerHTML = `<div class="${cls}">${msg}</div>` + last.innerHTML;
     }
+    const secureOk = () => (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
+
+    // ===== Config din URL / localStorage =====
+    const webhookEl = document.getElementById('webhook');
+    const tokenEl   = document.getElementById('token');
+    const deviceEl  = document.getElementById('deviceId');
+
+    function loadConfig() {
+      // 1) din localStorage
+      const lsWebhook = localStorage.getItem('scanner_webhook') || '';
+      const lsToken   = localStorage.getItem('scanner_token') || '';
+      const lsDevice  = localStorage.getItem('scanner_device') || '';
+      if (lsWebhook) webhookEl.value = lsWebhook;
+      if (lsToken)   tokenEl.value   = lsToken;
+      if (lsDevice)  deviceEl.value  = lsDevice;
+
+      // 2) din query string (suprascrie localStorage dacă există)
+      const q = new URLSearchParams(location.search);
+      const qsWebhook = q.get('YOUR_APPS_SCRIPT_WEBAPP_URL') || q.get('webhook') || q.get('url');
+      const qsToken   = q.get('REPLACE_WITH_SECRET') || q.get('token') || q.get('secret');
+      if (qsWebhook) webhookEl.value = qsWebhook;
+      if (qsToken)   tokenEl.value   = qsToken;
+
+      // 3) auto-salvare dacă vin prin URL
+      if (qsWebhook || qsToken) saveConfig(false /* no log */);
+    }
+    function saveConfig(showMsg=true) {
+      localStorage.setItem('scanner_webhook', webhookEl.value.trim());
+      localStorage.setItem('scanner_token',   tokenEl.value.trim());
+      localStorage.setItem('scanner_device',  deviceEl.value.trim());
+      if (showMsg) log('Config salvată local.', 'ok');
+    }
+    function clearConfig() {
+      localStorage.removeItem('scanner_webhook');
+      localStorage.removeItem('scanner_token');
+      localStorage.removeItem('scanner_device');
+      webhookEl.value = ''; tokenEl.value = ''; deviceEl.value = '';
+      log('Config ștearsă din localStorage.', 'ok');
+    }
+    document.getElementById('saveCfgBtn').addEventListener('click', () => saveConfig(true));
+    document.getElementById('clearCfgBtn').addEventListener('click', clearConfig);
+    loadConfig();
+
+    // ===== ISSN helpers =====
     function issnFromEan13(ean) {
       if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
       const issn7 = ean.substring(3, 10);
@@ -76,32 +126,46 @@
         return j?.message?.title || j?.message?.publisher || '—';
       } catch { return '—'; }
     }
+
+    // ===== POST cu fallback anti-CORS =====
     async function postToSheet(webhook, token, payload) {
+      // Încercare 1: JSON
       try {
-        const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, ...payload }) });
+        const r = await fetch(webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, ...payload })
+        });
         const j = await r.json().catch(()=> ({}));
         return { ok: !!j.ok, info: j.error || '' };
-      } catch(e){ return { ok:false, info: String(e) }; }
+      } catch(e1) {
+        // Încercare 2: x-www-form-urlencoded (evită preflight în multe cazuri)
+        try {
+          const form = new URLSearchParams();
+          form.set('token', token);
+          Object.entries(payload).forEach(([k,v]) => form.set(k, v ?? ''));
+          const r2 = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString()
+          });
+          const j2 = await r2.json().catch(()=> ({}));
+          return { ok: !!j2.ok, info: j2.error || '' };
+        } catch(e2) {
+          return { ok:false, info: String(e2) };
+        }
+      }
     }
 
-    // ===== Elemente & variabile =====
+    // ===== Cameră / Torch (BarcodeDetector) =====
     const preview = document.getElementById('preview');
     const startBtn = document.getElementById('startBtn');
     const stopBtn  = document.getElementById('stopBtn');
     const torchBtn = document.getElementById('toggleTorchBtn');
-    const webhookEl= document.getElementById('webhook');
-    const tokenEl  = document.getElementById('token');
-    const deviceEl = document.getElementById('deviceId');
 
-    let stream = null;
-    let detector = null;
-    let scanning = false;
+    let stream = null, detector = null, scanning = false;
     let lastEan = null, lastAt = 0;
 
-    // ===== Verificări de suport =====
-    function secureOk() {
-      return window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost';
-    }
     async function ensureBarcodeDetector() {
       if (!('BarcodeDetector' in window)) return false;
       try {
@@ -109,29 +173,22 @@
         return formats.includes('ean_13') || formats.includes('ean13');
       } catch { return false; }
     }
-
-    // ===== Cameră / Torch =====
     async function startCamera() {
-      if (!secureOk()) {
-        log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err');
-        return;
-      }
+      if (!secureOk()) { log('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' } },
           audio: false
         });
-        preview.srcObject = stream;
-        await preview.play();
+        preview.srcObject = stream; await preview.play();
         stopBtn.disabled = false;
-        // Torch suport?
         try {
           const track = stream.getVideoTracks?.()[0];
           const caps = track?.getCapabilities?.();
           if (caps && 'torch' in caps) torchBtn.disabled = false;
         } catch {}
       } catch(e) {
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') log('Acces la cameră blocat de permisiuni (verifică setările browserului).', 'err');
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') log('Acces la cameră blocat de permisiuni.', 'err');
         else if (e.name === 'NotFoundError') log('Nu există cameră disponibilă sau e ocupată.', 'err');
         else log('Eroare pornire cameră: ' + (e.message || e.name), 'err');
       }
@@ -151,7 +208,6 @@
       } catch (e) { log('Nu pot controla lanterna: ' + e.message, 'err'); }
     }
 
-    // ===== Scan loop (BarcodeDetector) =====
     async function scanLoop() {
       if (!detector || !scanning) return;
       try {
@@ -179,24 +235,23 @@
               log(`EAN: ${raw}\nISSN: ${issn || '—'}\nTitlu: ${title}\n(Configurează Webhook & Token)`, 'err');
               continue;
             }
-            const resp = await postToSheet(webhook, token, { ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() || '' });
+            const resp = await postToSheet(webhook, token, {
+              ean: raw, issn, title, variantCode, deviceId: deviceEl.value.trim() || ''
+            });
             if (resp.ok) log(`✔ Salvat\nEAN: ${raw}\nISSN: ${issn||'—'}\nTitlu: ${title}\nVariant: ${variantCode}`, 'ok');
             else log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}\nEAN: ${raw}`, 'err');
           }
         }
-      } catch (e) {
-        // Unele cadre pot da erori; continuăm.
+      } catch(e) {
+        // ignoră erorile izolate de detectare
       } finally {
         if (scanning) requestAnimationFrame(scanLoop);
       }
     }
 
-    // ===== Butoane =====
+    // ===== Legare butoane =====
     startBtn.addEventListener('click', async () => {
-      // pornește camera
       await startCamera();
-
-      // pregătește detectorul
       const supported = await ensureBarcodeDetector();
       if (!supported) {
         log('Browserul tău nu suportă BarcodeDetector (EAN-13). Încearcă Chrome/Edge pe Android sau iOS actualizat.', 'err');
@@ -205,21 +260,13 @@
       detector = new window.BarcodeDetector({ formats: ['ean_13'] });
       scanning = true;
       requestAnimationFrame(scanLoop);
-
       startBtn.disabled = true;
     });
-
-    stopBtn.addEventListener('click', () => {
-      scanning = false;
-      stopCamera();
-      startBtn.disabled = false;
-    });
+    stopBtn.addEventListener('click', () => { scanning = false; stopCamera(); startBtn.disabled = false; });
     torchBtn.addEventListener('click', toggleTorch);
 
     // avertisment dacă nu e HTTPS
-    if (!secureOk()) {
-      log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
-    }
+    if (!secureOk()) log('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
   </script>
 </body>
 </html>
