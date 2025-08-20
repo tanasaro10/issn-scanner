@@ -184,23 +184,33 @@ async function startCamera(){
 }
 function stopCamera(collapse=true){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; if(collapse){ cameraShell.classList.remove('active'); } }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; cameraShell.classList.remove('active'); }
 
-startBtn.addEventListener('click', ()=>{ preview.style.display='block'; stage.style.display='none'; cropHint.style.display='none'; startCamera(); });
+startBtn.addEventListener('click', ()=>{
+  // Prepare UI to show live video again
+  preview.style.display = 'block';
+  try { preview.play(); } catch(e){}
+  stage.style.display = 'none';
+  cropHint.style.display = 'none';
+  scanning = false;
+  startCamera();
+});
 stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); msg('Camera oprită.', ''); });
 
 // TAP pe video -> îngheață cadrul pentru crop/OCR
 preview.addEventListener('click', async ()=>{
   if (!preview.videoWidth) return;
+  // Capture current frame
   const cw = preview.videoWidth, ch = preview.videoHeight;
-  snapCanvas.width=cw; snapCanvas.height=ch;
+  snapCanvas.width = cw; snapCanvas.height = ch;
   snapCanvas.getContext('2d').drawImage(preview, 0, 0, cw, ch);
   const bmp = await createImageBitmap(snapCanvas);
-  // stop camera but keep container expanded
-  stopCamera(false);
-  // hide live video, show frozen frame for crop
-  preview.style.display='none';
+  // Pause scanning and video, but DO NOT stop or collapse the camera shell
+  scanning = false;
+  try { preview.pause(); } catch(e){}
+  // Hide live video and show frozen frame canvas
+  preview.style.display = 'none';
   drawImageToCropCanvas(bmp);
-  stage.style.display='block';
-  cropHint.style.display='block';
+  stage.style.display = 'block';
+  cropHint.style.display = 'block';
   msg('Cadrul a fost înghețat. Selectează zona CIP și apasă „OCR pe selecție”.','ok');
 });
 
@@ -217,8 +227,9 @@ async function scanLoop(){
         lastEan=raw; lastAt=now;
         const cls = classifyPublication(raw);
         if (cls.type==='isbn'){
-          // ISBN găsit -> oprește camera și ascunde live preview
-          stopCamera(false);
+          // ISBN găsit -> oprește scanarea, ascunde live preview (fără a colapsa containerul)
+          scanning = false;
+          try { preview.pause(); } catch(e){}
           preview.style.display='none';
           msg('ISBN detectat. Am completat formularul.','ok');
           populateForm({ type:'isbn', isbn: raw });
