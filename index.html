@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ISSN/ISBN + CIP (OCR) → Google Sheet</title>
+  <title>ISSN/ISBN + CIP (OCR cu decupaj) → Google Sheet</title>
   <style>
     :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; --bg:#fafafa; }
     body { font-family: system-ui, Arial, sans-serif; margin:0; padding:14px; background:var(--bg); color:#111; }
@@ -38,6 +38,10 @@
     .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:#fff; }
     .pill input { scale:1.1; }
     .result-grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+
+    /* hint peste canvas când nu există selecție */
+    .hint { color:#fff; position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.5); padding:4px 8px; border-radius:8px; font-size:12px; }
+    .stage { position:relative; }
   </style>
   <!-- OCR în browser -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
@@ -75,14 +79,19 @@
     </div>
     <div id="cameraShell" class="camera-shell">
       <video id="preview" playsinline muted></video>
+      <div class="stage" style="display:none" id="stage">
+        <canvas id="cropCanvas"></canvas>
+        <div class="hint" id="cropHint" style="display:none">Trage cu degetul/mouse-ul pentru a selecta zona CIP</div>
+      </div>
       <canvas id="snapCanvas" style="display:none"></canvas>
     </div>
     <div class="row">
       <button id="snapOcrBtn" disabled>Fă poză pt. OCR</button>
       <input id="imgFile" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" />
       <button id="ocrFromFileBtn" disabled>OCR din fișier</button>
+      <button id="ocrCropBtn" disabled>OCR pe selecție</button>
     </div>
-    <div class="muted">Camera scanează EAN-13 (ISBN/ISSN). Dacă nu găsește nimic, apasă „Fă poză pt. OCR” sau bifează „OCR fallback automat”.</div>
+    <div class="muted">Camera scanează EAN-13 (ISBN/ISSN). Dacă nu găsește nimic, apasă „Fă poză pt. OCR” sau bifează „OCR fallback automat”. După poză/upload: selectează zona CIP și „OCR pe selecție”.</div>
   </div>
 
   <!-- Introducere manuală ISBN -->
@@ -191,20 +200,23 @@ async function startCamera(){
   if (!secureOk()) { msg('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
   try{
     stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:{ideal:'environment'}}, audio:false });
-    preview.srcObject=stream; await preview.play(); stopBtn.disabled=true; // rămâne disabled până pregătim detectorul
+    preview.srcObject=stream; await preview.play(); stopBtn.disabled=true;
     cameraShell.classList.add('active');
-    try{ const track=stream.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); if (caps && 'torch' in caps) torchBtn.disabled=false; }catch{}
-    // pregătim detector
+    try{ const track=stream.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); if (caps && 'torch' in caps) { torchBtn.disabled=false; } }catch{}
     const ok = await ensureBarcodeDetector();
     if (!ok) {
-      msg('Browserul nu suportă BarcodeDetector (EAN-13). Poți folosi OCR.', 'err');
+      msg('Browserul nu suportă BarcodeDetector (EAN-13). Folosește OCR.', 'err');
       stopBtn.disabled=false;
       snapOcrBtn.disabled=false;
+      document.getElementById('stage').style.display = 'block';
+      document.getElementById('cropHint').style.display = 'block';
       return;
     }
     detector = new window.BarcodeDetector({ formats:['ean_13'] });
     scanning = true; startBtn.disabled = true; stopBtn.disabled=false;
-    snapOcrBtn.disabled=false; // putem face poză oricând
+    snapOcrBtn.disabled=false;
+    document.getElementById('stage').style.display = 'block';
+    document.getElementById('cropHint').style.display = 'block';
     msg('Scanez EAN-13…', '');
     requestAnimationFrame(scanLoop);
   }catch(e){
@@ -319,7 +331,7 @@ async function scanLoop(){
   }catch(e){ /* ignore */ }
   finally {
     if (!found && cbAutoOCR.checked) {
-      // n-am găsit nimic în cadrul curent → încearcă OCR
+      // n-am găsit nimic în cadrul curent → încearcă OCR complet pe cadru
       await ocrFromCurrentFrame(true);
       if (!cbContinuous.checked) { scanning=false; }
     }
@@ -327,26 +339,33 @@ async function scanLoop(){
   }
 }
 
-/* ============ OCR (Tesseract) + parsare CIP ============ */
+/* ============ OCR (Tesseract) + parsare CIP + DECUUPAJ ============ */
 const snapOcrBtn = document.getElementById('snapOcrBtn');
 const imgFile    = document.getElementById('imgFile');
 const ocrFromFileBtn = document.getElementById('ocrFromFileBtn');
+const ocrCropBtn = document.getElementById('ocrCropBtn');
 const ocrText    = document.getElementById('ocrText');
 const parseBtn   = document.getElementById('parseBtn');
 const clearTextBtn = document.getElementById('clearTextBtn');
 const saveBtn    = document.getElementById('saveBtn');
 const discardBtn = document.getElementById('discardBtn');
 
+const cropCanvas = document.getElementById('cropCanvas');
+const cropCtx = cropCanvas.getContext('2d');
+const stage = document.getElementById('stage');
+const cropHint = document.getElementById('cropHint');
+
 let tessWorker=null;
+let lastImageBitmap = null;   // ultima imagine afișată pt. crop
+let cropStart = null;         // {x,y}
+let cropEnd = null;
+
 async function ensureWorker(){
   if(!tessWorker){
     msg('Inițializez OCR…','wait');
     tessWorker = await Tesseract.createWorker('ron+eng');
   }
 }
-
-function cleanIsbn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===10||s.length===13) return s; return s; }
-function cleanIssn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===8){ return s.slice(0,4)+'-'+s.slice(4);} return s; }
 
 function normalizeOCR(t){
   if(!t) return '';
@@ -358,6 +377,9 @@ function normalizeOCR(t){
   s = s.replace(/I S B N/gi,'ISBN').replace(/I S S N/gi,'ISSN');
   return s.trim();
 }
+
+function cleanIsbn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===10||s.length===13) return s; return s; }
+function cleanIssn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===8){ return s.slice(0,4)+'-'+s.slice(4);} return s; }
 
 function parseCIP(text){
   const src = (text||'').trim();
@@ -407,9 +429,111 @@ function parseCIP(text){
   return { type, title, authors, publisher, year, isbn, issn };
 }
 
+/* ——— Decupaj & randare ——— */
+function drawImageToCropCanvas(imgBitmap) {
+  lastImageBitmap = imgBitmap;
+  // redimensionăm la max 1600 px lățime pentru claritate bună la OCR
+  const maxW = 1600;
+  const scale = Math.min(1, maxW / imgBitmap.width);
+  cropCanvas.width  = Math.round(imgBitmap.width * scale);
+  cropCanvas.height = Math.round(imgBitmap.height * scale);
+  cropCtx.clearRect(0,0,cropCanvas.width,cropCanvas.height);
+  cropCtx.drawImage(imgBitmap, 0, 0, cropCanvas.width, cropCanvas.height);
+  stage.style.display = 'block';
+  cropHint.style.display = 'block';
+  cropStart = cropEnd = null;
+  ocrCropBtn.disabled = false;
+}
+
+function redrawWithSelection() {
+  if (!lastImageBitmap) return;
+  cropCtx.drawImage(lastImageBitmap, 0, 0, cropCanvas.width, cropCanvas.height);
+  if (cropStart && cropEnd) {
+    const x = Math.min(cropStart.x, cropEnd.x);
+    const y = Math.min(cropStart.y, cropEnd.y);
+    const w = Math.abs(cropStart.x - cropEnd.x);
+    const h = Math.abs(cropStart.y - cropEnd.y);
+    cropCtx.save();
+    cropCtx.strokeStyle = '#00ff99';
+    cropCtx.lineWidth = 2;
+    cropCtx.setLineDash([6,4]);
+    cropCtx.strokeRect(x+0.5, y+0.5, w, h);
+    cropCtx.restore();
+  }
+}
+
+// returnează un <canvas> cu selecția (sau null dacă selecția e prea mică)
+function getCropCanvas() {
+  if (!cropStart || !cropEnd) return null;
+  const x = Math.max(0, Math.min(cropStart.x, cropEnd.x));
+  const y = Math.max(0, Math.min(cropStart.y, cropEnd.y));
+  const w = Math.min(cropCanvas.width - x, Math.abs(cropStart.x - cropEnd.x));
+  const h = Math.min(cropCanvas.height - y, Math.abs(cropStart.y - cropEnd.y));
+  if (w < 10 || h < 10) return null;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  out.getContext('2d').drawImage(cropCanvas, x, y, w, h, 0, 0, w, h);
+  return out;
+}
+
+/* ——— Evenimente mouse & touch pe canvas ——— */
+function canvasPosFromEvent(e) {
+  const rect = cropCanvas.getBoundingClientRect();
+  if (e.touches && e.touches[0]) {
+    return {
+      x: (e.touches[0].clientX - rect.left) * (cropCanvas.width / rect.width),
+      y: (e.touches[0].clientY - rect.top)  * (cropCanvas.height / rect.height)
+    };
+  } else {
+    return {
+      x: (e.clientX - rect.left) * (cropCanvas.width / rect.width),
+      y: (e.clientY - rect.top)  * (cropCanvas.height / rect.height)
+    };
+  }
+}
+
+// mouse
+cropCanvas.addEventListener('mousedown', (e)=>{
+  cropStart = canvasPosFromEvent(e);
+  cropEnd = null;
+  redrawWithSelection();
+});
+cropCanvas.addEventListener('mousemove', (e)=>{
+  if(!cropStart) return;
+  cropEnd = canvasPosFromEvent(e);
+  redrawWithSelection();
+});
+cropCanvas.addEventListener('mouseup', (e)=>{
+  if(!cropStart) return;
+  cropEnd = canvasPosFromEvent(e);
+  redrawWithSelection();
+});
+cropCanvas.addEventListener('mouseleave', (e)=>{
+  if(cropStart && !cropEnd){ cropEnd = canvasPosFromEvent(e); redrawWithSelection(); }
+});
+
+// touch
+cropCanvas.addEventListener('touchstart', (e)=>{
+  e.preventDefault();
+  cropStart = canvasPosFromEvent(e);
+  cropEnd = null;
+  redrawWithSelection();
+},{passive:false});
+cropCanvas.addEventListener('touchmove', (e)=>{
+  e.preventDefault();
+  if(!cropStart) return;
+  cropEnd = canvasPosFromEvent(e);
+  redrawWithSelection();
+},{passive:false});
+cropCanvas.addEventListener('touchend', (e)=>{
+  e.preventDefault();
+  if(!cropStart) return;
+  redrawWithSelection();
+},{passive:false});
+
+/* ——— OCR helpers ——— */
 async function ocrImageSource(imageBitmap){
   await ensureWorker();
-  // desenează în canvas temporar la lățime max 1600px pentru OCR ok
   const maxW = 1600, scale = Math.min(1, maxW / imageBitmap.width);
   const cw = Math.round(imageBitmap.width*scale), ch = Math.round(imageBitmap.height*scale);
   const tmp = document.createElement('canvas'); tmp.width=cw; tmp.height=ch;
@@ -419,7 +543,7 @@ async function ocrImageSource(imageBitmap){
   const clean = normalizeOCR(text);
   ocrText.value = clean;
   msg('OCR terminat. Apasă „Extrage câmpuri din text”.','ok');
-  log('OCR complet (din imagine).','ok');
+  log('OCR complet (imagine întreagă).','ok');
 }
 
 async function ocrFromCurrentFrame(silent=false){
@@ -428,12 +552,14 @@ async function ocrFromCurrentFrame(silent=false){
   const cw = preview.videoWidth, ch = preview.videoHeight;
   snapCanvas.width=cw; snapCanvas.height=ch;
   const c = snapCanvas.getContext('2d'); c.drawImage(preview, 0, 0, cw, ch);
+  const bmp = await createImageBitmap(snapCanvas);
+  drawImageToCropCanvas(bmp); // arată imaginea pt. selecție
   msg('Rulez OCR pe cadru…','wait');
   const { data:{ text } } = await tessWorker.recognize(snapCanvas);
   const clean = normalizeOCR(text);
-  if (!silent) { ocrText.value = clean; msg('OCR din cadru finalizat. „Extrage câmpuri”.','ok'); }
-  // dacă e fallback automat, încerci direct parsarea+salvarea
-  if (silent) {
+  if (!silent) {
+    ocrText.value = clean; msg('OCR din cadru finalizat. „Extrage câmpuri”.','ok');
+  } else {
     const r = parseCIP(clean);
     const pl = { type:r.type, ean:'', issn:r.issn||'', isbn:r.isbn||'', title:r.title||'—', authors:r.authors||'', publisher:r.publisher||'', publishedDate:'', year:r.year||'', pages:'', source:'ocr' };
     if (r.isbn || r.issn || r.title) {
@@ -444,33 +570,39 @@ async function ocrFromCurrentFrame(silent=false){
   }
 }
 
-document.getElementById('parseBtn').addEventListener('click', ()=>{
-  const t = ocrText.value;
-  if(!t){ msg('Nu există text pentru parsare. Rulează OCR sau lipește text.','err'); return; }
-  const r = parseCIP(t);
-  const pl = { type:r.type, ean:'', issn:r.issn||'', isbn:r.isbn||'', title:r.title||'—', authors:r.authors||'', publisher:r.publisher||'', publishedDate:'', year:r.year||'', pages:'', source:'ocr' };
-  showResultCard(pl); pendingPayload = pl;
-  if (cbAutoSave.checked) {
-    postToSheet(pl).then(resp=>{
-      if (resp.ok) { msg('✔ Salvat automat (OCR).','ok'); log(`✔ Salvat [OCR] ${pl.title||pl.isbn||pl.issn||''}`,'ok'); }
-      else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'),'err'); }
-    });
-  } else {
-    msg('Extragere completă (OCR). Verifică și salvează.','ok');
-  }
-});
-
-clearTextBtn.addEventListener('click', ()=>{ ocrText.value=''; msg('Text golit.',''); });
-
-const ocrFromFileEnable = ()=>{ ocrFromFileBtn.disabled = !imgFile.files?.[0]; };
-imgFile.addEventListener('change', ()=>{ ocrFromFileEnable(); });
+/* ——— Butoane OCR ——— */
+function toggleOcrFileBtn(){ ocrFromFileBtn.disabled = !imgFile.files?.[0]; }
+imgFile.addEventListener('change', ()=>{ toggleOcrFileBtn(); });
 ocrFromFileBtn.addEventListener('click', async ()=>{
   const f = imgFile.files?.[0]; if(!f){ msg('Alege un fișier imagine.','err'); return; }
-  const bmp = await createImageBitmap(f); await ocrImageSource(bmp);
+  const bmp = await createImageBitmap(f);
+  drawImageToCropCanvas(bmp);    // pentru selecție vizuală
+  await ocrImageSource(bmp);     // opțional: OCR imediat pe toată imaginea
 });
-snapOcrBtn.addEventListener('click', ()=> ocrFromCurrentFrame(false));
+snapOcrBtn.addEventListener('click', async ()=>{
+  if(!preview.videoWidth){ msg('Camera nu este activă pentru OCR.', 'err'); return; }
+  const cw = preview.videoWidth, ch = preview.videoHeight;
+  snapCanvas.width=cw; snapCanvas.height=ch;
+  snapCanvas.getContext('2d').drawImage(preview, 0, 0, cw, ch);
+  const bmp = await createImageBitmap(snapCanvas);
+  drawImageToCropCanvas(bmp);      // arată imaginea pentru selecție
+  // dacă vrei OCR automat pe tot cadrul, decomentează linia:
+  // await ocrImageSource(bmp);
+});
+ocrCropBtn.addEventListener('click', async ()=>{
+  if(!lastImageBitmap){ msg('Nu există imagine pentru OCR pe selecție.', 'err'); return; }
+  const sel = getCropCanvas();
+  if(!sel){ msg('Selectează zona CIP (trage cu degetul/mouse-ul).', 'err'); return; }
+  await ensureWorker();
+  msg('Rulez OCR pe selecție…','wait');
+  const { data:{ text } } = await tessWorker.recognize(sel);
+  const clean = normalizeOCR(text);
+  ocrText.value = clean;
+  msg('OCR selecție terminat. „Extrage câmpuri din text”.','ok');
+  log('OCR pe selecție (crop).','ok');
+});
 
-/* Salvare / Nu salva */
+/* Salvare / Nu salva (pentru orice payload deja afișat) */
 document.getElementById('saveBtn').addEventListener('click', async ()=>{
   if (!pendingPayload) return;
   const resp = await postToSheet(pendingPayload);
@@ -489,9 +621,26 @@ document.getElementById('manualLookupBtn').addEventListener('click', async ()=>{
   await handlePayloadAfterLookup(pl);
 });
 
+/* Parsare din textbox OCR */
+parseBtn.addEventListener('click', ()=>{
+  const t = ocrText.value;
+  if(!t){ msg('Nu există text pentru parsare. Rulează OCR sau lipește text.','err'); return; }
+  const r = parseCIP(t);
+  const pl = { type:r.type, ean:'', issn:r.issn||'', isbn:r.isbn||'', title:r.title||'—', authors:r.authors||'', publisher:r.publisher||'', publishedDate:'', year:r.year||'', pages:'', source:'ocr' };
+  showResultCard(pl); pendingPayload = pl;
+  if (cbAutoSave.checked) {
+    postToSheet(pl).then(resp=>{
+      if (resp.ok) { msg('✔ Salvat automat (OCR).','ok'); log(`✔ Salvat [OCR] ${pl.title||pl.isbn||pl.issn||''}`,'ok'); }
+      else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'),'err'); }
+    });
+  } else {
+    msg('Extragere completă (OCR). Verifică și salvează.','ok');
+  }
+});
+clearTextBtn.addEventListener('click', ()=>{ ocrText.value=''; msg('Text golit.',''); });
+
 /* Inițializări UI */
-const ocrFromFileBtnEl = document.getElementById('ocrFromFileBtn');
-ocrFromFileEnable();
+toggleOcrFileBtn();
 if (!secureOk()) msg('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
 </script>
 </body>
