@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CIP → Google Sheet (ISBN/ISSN din pagina 2/4)</title>
+  <title>ISSN/ISBN + CIP (OCR) → Google Sheet</title>
   <style>
     :root { --ok:#12a150; --warn:#b00020; --muted:#666; --card:#fff; --line:#e6e6e6; --bg:#fafafa; }
     body { font-family: system-ui, Arial, sans-serif; margin:0; padding:14px; background:var(--bg); color:#111; }
@@ -15,7 +15,7 @@
 
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:14px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .col { display:flex; flex-direction:column; gap:8px; }
+    .grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
     button { padding:10px 14px; border-radius:10px; border:1px solid #ccc; background:#f6f6f6; cursor:pointer; }
     button:disabled { opacity:.6; cursor:not-allowed; }
     input[type=text], input[type=password], textarea { padding:8px; border-radius:8px; border:1px solid #ccc; width:100%; }
@@ -23,121 +23,97 @@
     .muted { color:var(--muted); font-size:12px; margin-top:6px; }
     .status { padding:10px; border-radius:10px; border:1px dashed var(--line); background:#fff; font-size:14px; }
     .status.wait { background:#fffdf3; border-color:#e8d28b; }
-    .status.ok { background:#f4fdf7; border-color:#cce9d7; }
-    .status.err { background:#fff4f4; border-color:#f0b6b6; }
+    .status.ok   { background:#f4fdf7; border-color:#cce9d7; }
+    .status.err  { background:#fff4f4; border-color:#f0b6b6; }
     .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space:pre-wrap; font-size:12px; }
     .ok { color:var(--ok); } .err { color:var(--warn); }
 
+    .camera-shell { overflow:hidden; transition:max-height .25s ease, padding .25s ease, border-width .25s ease; max-height:0; padding:0 0; border:0 solid var(--line); border-radius:12px; background:#000; }
+    .camera-shell.active { max-height:70vh; padding:10px; border-width:1px; }
+    video, canvas { width:100%; border-radius:8px; background:#000; display:block; }
+
+    .result { display:grid; grid-template-columns: 1fr; gap:6px; }
+    .result .label { font-weight:600; color:#333; }
+    .actions { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
     .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:#fff; }
     .pill input { scale:1.1; }
-
-    /* canvas/capture */
-    .capture { display:grid; grid-template-columns:1fr; gap:10px; }
-    .stage { position:relative; background:#000; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
-    video, canvas { width:100%; display:block; background:#000; }
-    .crop-hint { position:absolute; right:8px; bottom:8px; color:#fff; background:rgba(0,0,0,.5); padding:4px 8px; border-radius:8px; font-size:12px; }
-    .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
-
-    .grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
-    .field { display:flex; flex-direction:column; gap:4px; }
-    .actions { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
-
-    details.config summary { cursor:pointer; font-weight:600; }
-    details.config[open] summary { margin-bottom:8px; }
-
-    .result-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
-    .kbd { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; background:#f3f3f3; border:1px solid #ddd; border-radius:6px; padding:2px 6px; }
+    .result-grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
   </style>
-  <!-- Tesseract.js (OCR în browser) -->
+  <!-- OCR în browser -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
   <div class="top">
-    <h2>CIP → Google Sheet</h2>
+    <h2>Scanează: Cod (EAN-13) sau Text CIP → Google Sheet</h2>
     <span id="cfgBadge" class="badge bad">Config lipsă</span>
   </div>
 
   <!-- Config -->
-  <details class="card config" id="cfgPanel">
+  <details class="card" id="cfgPanel">
     <summary>Config (Script ID & Secret)</summary>
     <div class="grid">
-      <div class="field">
-        <label>Google Script ID</label>
-        <input id="scriptId" type="text" placeholder="AKfycbx..." />
-        <div class="muted">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
-      </div>
-      <div class="field">
-        <label>Secret (Token)</label>
-        <input id="secret" type="password" placeholder="••••••" />
-      </div>
-      <div class="field">
-        <label>Device ID (opțional)</label>
-        <input id="deviceId" type="text" placeholder="ex. phone01" />
-      </div>
-      <div class="col" style="align-self:flex-end;">
-        <div class="actions">
-          <button id="saveCfgBtn">Salvează</button>
-          <button id="clearCfgBtn">Șterge</button>
-        </div>
-        <div class="muted">Poți seta o singură dată din URL: <code>?SCRIPT_ID=&amp;SECRET=</code></div>
+      <div><label>Google Script ID</label><input id="scriptId" type="text" placeholder="AKfycbx..." /><div class="muted">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div></div>
+      <div><label>Secret (Token)</label><input id="secret" type="password" placeholder="••••••" /></div>
+      <div><label>Device ID (opțional)</label><input id="deviceId" type="text" placeholder="ex. phone01" /></div>
+      <div class="row" style="align-items:flex-end">
+        <button id="saveCfgBtn">Salvează</button>
+        <button id="clearCfgBtn">Șterge</button>
       </div>
     </div>
+    <div class="muted">Poți seta din URL o singură dată: <code>?SCRIPT_ID=&amp;SECRET=</code></div>
   </details>
 
-  <!-- Captură / Upload -->
+  <!-- Cameră + controale -->
   <div class="card">
     <div class="row">
-      <span class="pill"><input type="checkbox" id="cbAutoSave"><label for="cbAutoSave">Salvare automată după extragere</label></span>
-      <span class="pill"><input type="checkbox" id="cbKeepCamera"><label for="cbKeepCamera">Ține camera deschisă</label></span>
+      <button id="startBtn">Pornește camera</button>
+      <button id="stopBtn" disabled>Oprește camera</button>
+      <button id="toggleTorchBtn" disabled>Lanternă</button>
+      <span class="pill"><input type="checkbox" id="cbContinuous"><label for="cbContinuous">Scanare continuă (EAN)</label></span>
+      <span class="pill"><input type="checkbox" id="cbAutoSave"><label for="cbAutoSave">Salvare automată</label></span>
+      <span class="pill"><input type="checkbox" id="cbAutoOCR"><label for="cbAutoOCR">OCR fallback automat</label></span>
     </div>
-    <div class="capture">
-      <div class="toolbar">
-        <button id="openCameraBtn">Deschide camera</button>
-        <button id="snapBtn" disabled>Fă poză</button>
-        <button id="closeCameraBtn" disabled>Închide camera</button>
-        <input id="fileInput" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" />
-        <button id="rotateBtn" disabled>Rotește 90°</button>
-        <button id="ocrBtn" disabled>OCR pe întreaga imagine</button>
-        <button id="ocrCropBtn" disabled>OCR pe selecția decupată</button>
+    <div id="cameraShell" class="camera-shell">
+      <video id="preview" playsinline muted></video>
+      <canvas id="snapCanvas" style="display:none"></canvas>
+    </div>
+    <div class="row">
+      <button id="snapOcrBtn" disabled>Fă poză pt. OCR</button>
+      <input id="imgFile" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" />
+      <button id="ocrFromFileBtn" disabled>OCR din fișier</button>
+    </div>
+    <div class="muted">Camera scanează EAN-13 (ISBN/ISSN). Dacă nu găsește nimic, apasă „Fă poză pt. OCR” sau bifează „OCR fallback automat”.</div>
+  </div>
+
+  <!-- Introducere manuală ISBN -->
+  <div class="card">
+    <div class="row">
+      <div style="flex:1; min-width:260px">
+        <label>ISBN (manual — pentru EAN 594…)</label>
+        <input id="manualIsbn" type="text" placeholder="978..." />
       </div>
-      <div class="stage" id="stage">
-        <video id="video" playsinline muted></video>
-        <canvas id="canvas" aria-label="canvas imagine"></canvas>
-        <div class="crop-hint">Trage cu mouse-ul pentru a selecta zona CIP</div>
-      </div>
-      <div class="muted">Ideal: fotografiază drept pagina 2/4 cu „Descrierea CIP a Bibliotecii Naționale a României”. Selectează zona de text, apoi OCR.</div>
+      <div><button id="manualLookupBtn">Caută</button></div>
     </div>
   </div>
 
-  <!-- Text OCR + parsare -->
+  <!-- Status + rezultat curent -->
   <div class="card">
-    <div class="row" style="align-items:flex-start;">
-      <div style="flex:1; min-width:280px">
-        <label>Text OCR (poți lipi aici dacă ai deja textul)</label>
-        <textarea id="ocrText" rows="10" placeholder="Aici va apărea textul CIP…"></textarea>
-        <div class="actions">
-          <button id="parseBtn">Extrage câmpuri</button>
-          <button id="clearTextBtn">Golește</button>
-        </div>
-      </div>
-      <div style="flex:1; min-width:280px">
-        <div><strong>Rezultat (editabil înainte de salvare)</strong></div>
-        <div class="result-grid" style="margin-top:8px">
-          <div class="field"><label>Tip</label><input id="outType" type="text" placeholder="isbn/issn" /></div>
-          <div class="field"><label>Titlu</label><input id="outTitle" type="text" /></div>
-          <div class="field"><label>Autori</label><input id="outAuthors" type="text" placeholder="nume, prenume; ..." /></div>
-          <div class="field"><label>Editura</label><input id="outPublisher" type="text" /></div>
-          <div class="field"><label>An</label><input id="outYear" type="text" /></div>
-          <div class="field"><label>ISBN</label><input id="outISBN" type="text" /></div>
-          <div class="field"><label>ISSN (dacă e cazul)</label><input id="outISSN" type="text" /></div>
-        </div>
-        <div class="actions">
-          <button id="saveBtn" disabled>Salvează</button>
-          <button id="discardBtn" disabled>Nu salva</button>
-        </div>
-      </div>
-    </div>
     <div id="statusBox" class="status">Gata.</div>
+    <div id="resultBox" class="result" style="display:none; margin-top:8px"></div>
+    <div id="resultActions" class="actions" style="display:none">
+      <button id="saveBtn">Salvează</button>
+      <button id="discardBtn">Nu salva</button>
+    </div>
+  </div>
+
+  <!-- Text OCR (opțional) -->
+  <div class="card">
+    <div><strong>Text OCR (opțional – poți lipi aici)</strong></div>
+    <textarea id="ocrText" rows="8" placeholder="Aici apare textul rezultat din OCR…"></textarea>
+    <div class="actions">
+      <button id="parseBtn">Extrage câmpuri din text</button>
+      <button id="clearTextBtn">Golește</button>
+    </div>
   </div>
 
   <!-- Jurnal -->
@@ -147,73 +123,48 @@
   </div>
 
 <script>
-/* ========= Config ========= */
+/* ============ Config & utilitare ============ */
 const BASE_WEBAPP = "https://script.google.com/macros/s/";
 const badge = document.getElementById('cfgBadge');
 const scriptIdEl = document.getElementById('scriptId');
 const secretEl   = document.getElementById('secret');
 const deviceEl   = document.getElementById('deviceId');
-const cbAutoSave = document.getElementById('cbAutoSave');
-const cbKeepCamera = document.getElementById('cbKeepCamera');
+const statusBox  = document.getElementById('statusBox');
+
+const cbContinuous = document.getElementById('cbContinuous');
+const cbAutoSave   = document.getElementById('cbAutoSave');
+const cbAutoOCR    = document.getElementById('cbAutoOCR');
 
 function setBadge(ok){ if(ok){ badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
-function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'', autosave: localStorage.getItem('pref_autosave')==='1', keepcam: localStorage.getItem('pref_keepcam')==='1' }; }
-function saveCfg({scriptId, secret, device}){
-  if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim());
-  if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim());
-  if(typeof device==='string') localStorage.setItem('scanner_device',device.trim());
-  const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret));
-}
-function clearCfg(){
-  localStorage.removeItem('scanner_script_id');
-  localStorage.removeItem('scanner_secret');
-  localStorage.removeItem('scanner_device');
-  scriptIdEl.value=''; secretEl.value=''; deviceEl.value='';
-  setBadge(false); log('Config ștearsă.','ok');
-}
-function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
-(function loadFromURL(){
-  const p=new URLSearchParams(location.search);
-  const sid=p.get('SCRIPT_ID')||p.get('scriptId')||p.get('sid')||p.get('SID')||'';
-  const sec=p.get('SECRET')||p.get('secret')||p.get('token')||p.get('TOKEN')||'';
-  let changed=false; if(sid){localStorage.setItem('scanner_script_id',sid);changed=true;} if(sec){localStorage.setItem('scanner_secret',sec);changed=true;}
-  if(changed){ ['SCRIPT_ID','scriptId','sid','SID','SECRET','secret','token','TOKEN'].forEach(k=>p.delete(k)); const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); }
-})();
-function fillInputsFromStorage(){
-  const {scriptId, secret, device, autosave, keepcam} = getCfg();
-  scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device;
-  cbAutoSave.checked = autosave; cbKeepCamera.checked = keepcam;
-  setBadge(Boolean(scriptId && secret));
-}
+function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'', cont: localStorage.getItem('pref_continuous')==='1', autosave: localStorage.getItem('pref_autosave')==='1', autoocr: localStorage.getItem('pref_autoocr')==='1' }; }
+function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret)); }
+function clearCfg(){ localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device'); scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.', 'ok'); }
+function fillInputsFromStorage(){ const {scriptId, secret, device, cont, autosave, autoocr} = getCfg(); scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device; cbContinuous.checked=cont; cbAutoSave.checked=autosave; cbAutoOCR.checked=autoocr; setBadge(Boolean(scriptId && secret)); }
+(function loadFromURL(){ const p=new URLSearchParams(location.search); const sid=p.get('SCRIPT_ID')||p.get('sid')||''; const sec=p.get('SECRET')||p.get('token')||''; let changed=false; if(sid){localStorage.setItem('scanner_script_id',sid);changed=true;} if(sec){localStorage.setItem('scanner_secret',sec);changed=true;} if(changed){ ['SCRIPT_ID','sid','SECRET','token'].forEach(k=>p.delete(k)); const newQs=p.toString(); history.replaceState(null,'',location.pathname+(newQs?('?'+newQs):'')+location.hash); }})();
 fillInputsFromStorage();
 document.getElementById('saveCfgBtn').addEventListener('click',()=>{ saveCfg({scriptId:scriptIdEl.value,secret:secretEl.value,device:deviceEl.value}); msg('Config salvată local.','ok'); });
 document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
-cbAutoSave.addEventListener('change', ()=> localStorage.setItem('pref_autosave', cbAutoSave.checked ? '1':'0'));
-cbKeepCamera.addEventListener('change', ()=> localStorage.setItem('pref_keepcam', cbKeepCamera.checked ? '1':'0'));
+cbContinuous.addEventListener('change', ()=> localStorage.setItem('pref_continuous', cbContinuous.checked ? '1':'0'));
+cbAutoSave.addEventListener('change', ()=> localStorage.setItem('pref_autosave',   cbAutoSave.checked ? '1':'0'));
+cbAutoOCR .addEventListener('change', ()=> localStorage.setItem('pref_autoocr',    cbAutoOCR.checked  ? '1':'0'));
 
-/* ========= UI utils ========= */
-const statusBox = document.getElementById('statusBox');
-function msg(text, type=''){ statusBox.className='status '+(type||''); statusBox.textContent=text; }
+function msg(text, type=''){ statusBox.className='status ' + (type||''); statusBox.textContent=text; }
 function log(text, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${new Date().toLocaleTimeString()} — ${text}</div>` + last.innerHTML; }
 const secureOk = () => (window.isSecureContext || location.protocol==='https:' || location.hostname==='localhost');
+function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
 
-/* ========= Salvare către Script ========= */
 async function postToSheet(payload){
   const {secret, device} = getCfg(); const webhook = buildWebhook();
   if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
-
-  // 1) JSON
   try {
     const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token:secret, deviceId: device||'', ...payload }) });
     const j = await r.json().catch(()=> ({})); return { ok: !!j.ok, info: j.error || '' };
   } catch (e1) {
-    // 2) x-www-form-urlencoded
     try {
       const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
       const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
       const j2 = await r2.json().catch(()=> ({})); return { ok: (j2.ok===true)||r2.ok, info: j2.error || '' };
     } catch (e2) {
-      // 3) no-cors
       try {
         const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k,(v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
         await fetch(webhook, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
@@ -223,269 +174,226 @@ async function postToSheet(payload){
   }
 }
 
-/* ========= Camera / Canvas / Crop ========= */
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const openCameraBtn = document.getElementById('openCameraBtn');
-const closeCameraBtn = document.getElementById('closeCameraBtn');
-const snapBtn = document.getElementById('snapBtn');
-const rotateBtn = document.getElementById('rotateBtn');
-const ocrBtn = document.getElementById('ocrBtn');
-const ocrCropBtn = document.getElementById('ocrCropBtn');
-const fileInput = document.getElementById('fileInput');
+/* ============ Cameră + BarcodeDetector ============ */
+const preview = document.getElementById('preview');
+const startBtn = document.getElementById('startBtn');
+const stopBtn  = document.getElementById('stopBtn');
+const torchBtn = document.getElementById('toggleTorchBtn');
+const cameraShell  = document.getElementById('cameraShell');
+const snapCanvas = document.getElementById('snapCanvas');
 
-let stream=null, rotation=0;
-let imgBitmap=null; // imaginea curentă afișată în canvas (din poză/camera)
-let cropStart=null, cropEnd=null;
+let stream=null, detector=null, scanning=false;
+let lastEan=null, lastAt=0;
+let pendingPayload=null;
 
-function resizeCanvasTo(bitmap){
-  const maxW = Math.min(1600, window.innerWidth*1.5);
-  const scale = Math.min(1, maxW / bitmap.width);
-  canvas.width = Math.round(bitmap.width*scale);
-  canvas.height= Math.round(bitmap.height*scale);
-}
-
-function render(){
-  if(!imgBitmap) return;
-  // redare cu rotație în multipli de 90°
-  const turns = ((rotation%360)+360)%360/90|0;
-  const w = imgBitmap.width, h = imgBitmap.height;
-  let dW=w, dH=h;
-  if(turns%2===1){ dW=h; dH=w; }
-  const maxW = Math.min(1600, window.innerWidth*1.5);
-  const scale = Math.min(1, maxW / dW);
-  canvas.width = Math.round(dW*scale);
-  canvas.height= Math.round(dH*scale);
-
-  ctx.save();
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.translate(canvas.width/2, canvas.height/2);
-  ctx.rotate(turns * Math.PI/2);
-  const drawW = Math.round(w*scale);
-  const drawH = Math.round(h*scale);
-  if(turns%2===0){
-    ctx.drawImage(imgBitmap, -drawW/2, -drawH/2, drawW, drawH);
-  } else {
-    ctx.drawImage(imgBitmap, -drawH/2, -drawW/2, drawH, drawW);
-  }
-  ctx.restore();
-
-  // desenează selecția dacă există
-  if(cropStart && cropEnd){
-    const x = Math.min(cropStart.x, cropEnd.x), y=Math.min(cropStart.y, cropEnd.y);
-    const w = Math.abs(cropStart.x - cropEnd.x), h=Math.abs(cropStart.y - cropEnd.y);
-    ctx.save();
-    ctx.strokeStyle = '#00ff99';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x+.5,y+.5,w,h);
-    ctx.restore();
-  }
-}
-
+async function ensureBarcodeDetector(){ if (!('BarcodeDetector' in window)) return false; try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; } }
 async function startCamera(){
-  if (!secureOk()) { msg('Deschide pe HTTPS (sau localhost) pentru acces cameră.','err'); return; }
+  if (!secureOk()) { msg('Pagina nu este pe HTTPS — accesul la cameră va fi blocat.', 'err'); return; }
   try{
     stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:{ideal:'environment'}}, audio:false });
-    video.srcObject = stream; await video.play();
-    snapBtn.disabled=false; closeCameraBtn.disabled=false;
-    msg('Camera pornită. Încadrează pagina CIP și fă poză.', '');
+    preview.srcObject=stream; await preview.play(); stopBtn.disabled=true; // rămâne disabled până pregătim detectorul
+    cameraShell.classList.add('active');
+    try{ const track=stream.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); if (caps && 'torch' in caps) torchBtn.disabled=false; }catch{}
+    // pregătim detector
+    const ok = await ensureBarcodeDetector();
+    if (!ok) {
+      msg('Browserul nu suportă BarcodeDetector (EAN-13). Poți folosi OCR.', 'err');
+      stopBtn.disabled=false;
+      snapOcrBtn.disabled=false;
+      return;
+    }
+    detector = new window.BarcodeDetector({ formats:['ean_13'] });
+    scanning = true; startBtn.disabled = true; stopBtn.disabled=false;
+    snapOcrBtn.disabled=false; // putem face poză oricând
+    msg('Scanez EAN-13…', '');
+    requestAnimationFrame(scanLoop);
   }catch(e){
-    msg('Eroare cameră: '+(e.message||e.name),'err');
+    msg('Eroare pornire cameră: '+(e.message||e.name), 'err');
   }
 }
-function stopCamera(){
-  try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{}
-  stream=null; video.srcObject=null;
-  snapBtn.disabled=true; closeCameraBtn.disabled=true;
+function stopCamera(){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; torchBtn.disabled=true; cameraShell.classList.remove('active'); startBtn.disabled=false; }
+async function toggleTorch(){ const track=stream?.getVideoTracks?.()[0]; if(!track) return; try{ const caps=track.getCapabilities?.(); if(!caps||!('torch' in caps)) return msg('Torch nesuportat pe acest device.', 'err'); const st=track.getSettings?.()||{}; await track.applyConstraints({advanced:[{torch:!st.torch}]}); }catch(e){ msg('Nu pot controla lanterna: '+e.message, 'err'); } }
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); msg('Camera oprită.', ''); });
+
+function showResultCard(pl){
+  const resultBox    = document.getElementById('resultBox');
+  const resultActions= document.getElementById('resultActions');
+  resultBox.style.display='grid';
+  resultActions.style.display = cbAutoSave.checked ? 'none' : 'flex';
+  resultBox.innerHTML = `
+    <div><span class="label">Tip:</span> ${(pl.type||'').toUpperCase()}</div>
+    ${pl.ean ? `<div><span class="label">EAN:</span> ${pl.ean}</div>`:''}
+    ${pl.isbn? `<div><span class="label">ISBN:</span> ${pl.isbn}</div>`:''}
+    ${pl.issn? `<div><span class="label">ISSN:</span> ${pl.issn}</div>`:''}
+    ${pl.title? `<div><span class="label">Titlu:</span> ${pl.title}</div>`:''}
+    ${pl.authors? `<div><span class="label">Autori:</span> ${pl.authors}</div>`:''}
+    ${pl.publisher? `<div><span class="label">Editura:</span> ${pl.publisher}</div>`:''}
+    ${pl.publishedDate? `<div><span class="label">Data:</span> ${pl.publishedDate}</div>`:''}
+    ${pl.year? `<div><span class="label">An:</span> ${pl.year}</div>`:''}
+    ${pl.pages? `<div><span class="label">Pagini:</span> ${pl.pages}</div>`:''}
+    ${pl.source? `<div><span class="label">Sursă:</span> ${pl.source}</div>`:''}
+  `;
 }
 
-async function paintFromVideo(){
-  if(!video.videoWidth) return;
-  const bmp = await createImageBitmap(video);
-  imgBitmap = bmp; rotation=0; cropStart=null; cropEnd=null;
-  render();
-  ocrBtn.disabled=false; ocrCropBtn.disabled=false; rotateBtn.disabled=false; enableSave(false);
+function hideResultCard(){ document.getElementById('resultBox').style.display='none'; document.getElementById('resultActions').style.display='none'; document.getElementById('resultBox').innerHTML=''; }
+
+async function handlePayloadAfterLookup(pl){
+  pendingPayload = pl;
+  showResultCard(pl);
+  if (cbAutoSave.checked) {
+    const resp = await postToSheet(pl);
+    if (resp.ok) { msg('✔ Salvat automat.', 'ok'); log(`✔ Salvat [${pl.type?.toUpperCase()}] ${pl.title||pl.isbn||pl.issn||''}`, 'ok'); }
+    else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'), 'err'); log(`✖ Eroare la salvare: ${resp.info||'(unknown)'}`, 'err'); }
+  } else {
+    msg('Gata. Verifică detaliile și apasă „Salvează” sau „Nu salva”.', 'ok');
+  }
 }
 
-fileInput.addEventListener('change', async (e)=>{
-  const f = e.target.files?.[0]; if(!f) return;
-  const bmp = await createImageBitmap(f);
-  imgBitmap = bmp; rotation=0; cropStart=null; cropEnd=null;
-  render();
-  ocrBtn.disabled=false; ocrCropBtn.disabled=false; rotateBtn.disabled=false; enableSave(false);
-  msg('Imagine încărcată. Poți selecta zona CIP și rula OCR.','');
-});
+/* Clasificare simplă */
+function classifyPublication(ean13){ if(!/^\d{13}$/.test(ean13)) return {type:'other'}; if(ean13.startsWith('977')) return {type:'issn'}; if(ean13.startsWith('978')||ean13.startsWith('979')) return {type:'isbn'}; return {type:'other'}; }
+function issnFromEan13(ean){
+  if (!/^\d{13}$/.test(ean) || !ean.startsWith('977')) return null;
+  const issn7 = ean.substring(3,10), variant = ean.substring(10,12);
+  const w=[8,7,6,5,4,3,2]; let s=0; for(let i=0;i<7;i++) s += (+issn7[i])*w[i];
+  const r=s%11, cd=(11-r)%11, check=(cd===10)?'X':String(cd);
+  return { issn: issn7.slice(0,4)+'-'+issn7.slice(4)+check, variantCode: variant };
+}
 
-openCameraBtn.addEventListener('click', startCamera);
-closeCameraBtn.addEventListener('click', ()=>{ stopCamera(); msg('Camera închisă.',''); });
-snapBtn.addEventListener('click', async ()=>{ await paintFromVideo(); if(!cbKeepCamera.checked) stopCamera(); });
+/* Lookups (local minimal) */
+async function safeJson(url, opts){ try{ const r=await fetch(url, opts||{}); if(!r.ok) throw 0; return await r.json(); } catch{ return null; } }
+async function lookupISBNLocal(isbn){
+  const g = await safeJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`);
+  const it = g?.items?.[0], v=it?.volumeInfo||null;
+  if (v){ return { title:v.title||'—', subtitle:v.subtitle||'', authors:Array.isArray(v.authors)?v.authors:[], publisher:v.publisher||'', publishedDate:v.publishedDate||'', pages:v.pageCount||'', language:v.language||'', categories:Array.isArray(v.categories)?v.categories.join(', '):'', cover:v.imageLinks?.thumbnail||'', source:'googlebooks' }; }
+  const s = await safeJson(`https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}`); const d=s?.docs?.[0];
+  if (d){ return { title:d.title||'—', authors:Array.isArray(d.author_name)?d.author_name:[], publisher:Array.isArray(d.publisher)?d.publisher.slice(0,3).join(', '):(d.publisher||''), publishedDate:d.first_publish_year?String(d.first_publish_year):(d.publish_date&&d.publish_date[0])||'', pages:d.number_of_pages_median||'', source:'openlibrary_search' }; }
+  return null;
+}
+async function lookupISSNLocal(issn){
+  const j = await safeJson(`https://api.crossref.org/journals/${encodeURIComponent(issn)}`);
+  if (j?.message) return { title:j.message.title||'—', publisher:j.message.publisher||'', source:'crossref_journals' };
+  return null;
+}
 
-rotateBtn.addEventListener('click', ()=>{ rotation = (rotation+90)%360; render(); });
+/* Scan loop — cu fallback opțional la OCR */
+async function scanLoop(){
+  if (!detector || !scanning) return;
+  let found=false;
+  try{
+    const barcodes = await detector.detect(preview);
+    if (barcodes && barcodes.length){
+      for (const b of barcodes){
+        const raw = String(b.rawValue||'').trim(); if (!raw) continue;
+        const now=Date.now(); if (raw===lastEan && (now-lastAt)<2000) continue;
+        lastEan=raw; lastAt=now; found=true;
 
-/* Crop cu mouse */
-canvas.addEventListener('mousedown', (e)=>{
-  const rect = canvas.getBoundingClientRect();
-  cropStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  cropEnd = null;
-});
-canvas.addEventListener('mousemove', (e)=>{
-  if(!cropStart) return;
-  const rect = canvas.getBoundingClientRect();
-  cropEnd = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  render();
-});
-canvas.addEventListener('mouseup', (e)=>{
-  const rect = canvas.getBoundingClientRect();
-  if(!cropStart){ cropEnd=null; return; }
-  cropEnd = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  render();
-});
+        const cls = classifyPublication(raw);
+        if (cls.type==='other'){ log(`EAN non-publicație: ${raw}`, 'err'); msg('Cod non-publicație. Poți încerca OCR.', 'err'); if (!cbContinuous.checked) { scanning=false; } break; }
 
-/* ========= OCR ========= */
-const ocrText = document.getElementById('ocrText');
+        let pl = { type: cls.type, ean: raw, issn:'', isbn:'', title:'—', authors:'', publisher:'', publishedDate:'', pages:'', source:'' };
+        msg('Caut informații…', 'wait');
+        if (cls.type==='issn'){
+          const p = issnFromEan13(raw);
+          if (!p){ msg('ISSN derivat invalid.', 'err'); break; }
+          pl.issn=p.issn;
+          let det = await lookupISSNLocal(p.issn);
+          pl.title = det?.title || '—'; pl.publisher = det?.publisher || ''; pl.source = det?.source || '';
+        } else {
+          pl.isbn = raw;
+          let det = await lookupISBNLocal(raw);
+          pl.title = det?.title || '—';
+          pl.authors = Array.isArray(det?.authors)? det.authors.join(', '):(det?.authors||'');
+          pl.publisher = det?.publisher || '';
+          pl.publishedDate = det?.publishedDate || '';
+          pl.pages = det?.pages || '';
+          pl.source = det?.source || '';
+        }
+
+        await handlePayloadAfterLookup(pl);
+        if (!cbContinuous.checked){ scanning=false; }
+        break;
+      }
+    }
+  }catch(e){ /* ignore */ }
+  finally {
+    if (!found && cbAutoOCR.checked) {
+      // n-am găsit nimic în cadrul curent → încearcă OCR
+      await ocrFromCurrentFrame(true);
+      if (!cbContinuous.checked) { scanning=false; }
+    }
+    if (scanning) requestAnimationFrame(scanLoop);
+  }
+}
+
+/* ============ OCR (Tesseract) + parsare CIP ============ */
+const snapOcrBtn = document.getElementById('snapOcrBtn');
+const imgFile    = document.getElementById('imgFile');
+const ocrFromFileBtn = document.getElementById('ocrFromFileBtn');
+const ocrText    = document.getElementById('ocrText');
+const parseBtn   = document.getElementById('parseBtn');
+const clearTextBtn = document.getElementById('clearTextBtn');
+const saveBtn    = document.getElementById('saveBtn');
+const discardBtn = document.getElementById('discardBtn');
+
 let tessWorker=null;
-
 async function ensureWorker(){
   if(!tessWorker){
     msg('Inițializez OCR…','wait');
-    tessWorker = await Tesseract.createWorker('ron+eng'); // română + engleză
+    tessWorker = await Tesseract.createWorker('ron+eng');
   }
 }
 
-function getCropImageData(){
-  if(!imgBitmap) return null;
-  if(!cropStart || !cropEnd){
-    // tot canvasul
-    return canvas.transferToImageBitmap ? canvas.transferToImageBitmap() : null;
-  }
-  const x = Math.max(0, Math.min(cropStart.x, cropEnd.x));
-  const y = Math.max(0, Math.min(cropStart.y, cropEnd.y));
-  const w = Math.min(canvas.width - x, Math.abs(cropStart.x - cropEnd.x));
-  const h = Math.min(canvas.height - y, Math.abs(cropStart.y - cropEnd.y));
-  if (w<10 || h<10) return null;
+function cleanIsbn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===10||s.length===13) return s; return s; }
+function cleanIssn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===8){ return s.slice(0,4)+'-'+s.slice(4);} return s; }
 
-  const tmp = document.createElement('canvas');
-  tmp.width = w; tmp.height = h;
-  const tctx = tmp.getContext('2d');
-  tctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
-  return tmp;
-}
-
-async function doOCR(sourceCanvas){
-  await ensureWorker();
-  msg('Rulez OCR…','wait');
-  const { data:{ text } } = await tessWorker.recognize(sourceCanvas);
-  const clean = normalizeOCR(text);
-  ocrText.value = clean;
-  msg('OCR terminat. Apasă „Extrage câmpuri”.','ok');
-  log('OCR complet. '+Math.max(10,clean.length)+' caractere','ok');
-}
-
-/* Normalizez OCR: unesc linii rupte, repar ligaturi, diacritice comune */
 function normalizeOCR(t){
   if(!t) return '';
-  let s = t.replace(/\r/g,'');
-  // scoate header/footer repetitiv
-  s = s.replace(/[—–-]\s*Descrierea\s+CIP[^\n]*\n/gi,'\n');
-  // uneste cuvinte rupte la capăt de linie: "infor-\nmație" -> "informație"
-  s = s.replace(/-\n/g,'');
-  // spații multiple -> un spațiu
-  s = s.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n');
+  let s=t.replace(/\r/g,'');
+  s = s.replace(/-\n/g,'');                 // liant de rând
+  s = s.replace(/[ \t]+\n/g,'\n');
+  s = s.replace(/\n{3,}/g,'\n\n');
   s = s.replace(/[ \t]{2,}/g,' ');
-  // corecții frecvente OCR
   s = s.replace(/I S B N/gi,'ISBN').replace(/I S S N/gi,'ISSN');
-  s = s.replace(/Bucureşti/g,'București');
   return s.trim();
-}
-
-ocrBtn.addEventListener('click', async ()=>{
-  if(!imgBitmap){ msg('Încarcă o imagine sau fă o poză întâi.','err'); return; }
-  await doOCR(canvas);
-});
-ocrCropBtn.addEventListener('click', async ()=>{
-  if(!imgBitmap){ msg('Încarcă o imagine sau fă o poză întâi.','err'); return; }
-  const crop = getCropImageData(); if(!crop){ msg('Selectează cu mouse-ul zona CIP (trage un dreptunghi).','err'); return; }
-  await doOCR(crop);
-});
-
-/* ========= Parsare CIP → câmpuri ========= */
-const outType = document.getElementById('outType');
-const outTitle= document.getElementById('outTitle');
-const outAuthors=document.getElementById('outAuthors');
-const outPublisher=document.getElementById('outPublisher');
-const outYear=document.getElementById('outYear');
-const outISBN=document.getElementById('outISBN');
-const outISSN=document.getElementById('outISSN');
-const parseBtn=document.getElementById('parseBtn');
-const clearTextBtn=document.getElementById('clearTextBtn');
-const saveBtn=document.getElementById('saveBtn');
-const discardBtn=document.getElementById('discardBtn');
-
-function enableSave(on){ saveBtn.disabled=!on; discardBtn.disabled=!on; }
-
-function cleanIsbn(raw){
-  if(!raw) return '';
-  let s = raw.replace(/[^0-9Xx]/g,'').toUpperCase();
-  // dacă sunt 10 cifre -> ISBN10, dacă 13 -> ISBN13
-  if(s.length===10 || s.length===13) return s;
-  // uneori OCR ratează un X sau o cifră; nu forțăm
-  return s;
-}
-function cleanIssn(raw){
-  if(!raw) return '';
-  let s = raw.replace(/[^0-9Xx]/g,'').toUpperCase();
-  if(s.length===8){ return s.slice(0,4)+'-'+s.slice(4); }
-  return s;
 }
 
 function parseCIP(text){
   const src = (text||'').trim();
   const lower = src.toLowerCase();
 
-  // ISBN
+  // ISBN / ISSN
   let isbnMatch = src.match(/ISBN(?:\s*13)?\s*[:]?\s*([0-9Xx][0-9\-\sXx]{7,})/);
-  if(!isbnMatch){ // alte variante
-    isbnMatch = src.match(/\b(97[89][0-9\-\s]{8,}[0-9Xx])\b/);
-  }
+  if(!isbnMatch){ isbnMatch = src.match(/\b(97[89][0-9\-\s]{8,}[0-9Xx])\b/); }
   const isbn = cleanIsbn(isbnMatch?.[1]||'');
 
-  // ISSN (uneori apare în CIP pentru serii)
   let issnMatch = src.match(/ISSN\s*[:]?\s*([0-9Xx][0-9\-\sXx]{3,})/i);
   const issn = cleanIssn(issnMatch?.[1]||'');
 
-  // Titlu + Autori (heurstică: linia înainte de "/" e titlu; după "/" autorii)
-  // Luăm primele 6-10 linii semnificative (după „Descrierea CIP...”)
+  // Titlu / Autori
   let block = src;
   const idxCIP = lower.indexOf('descrierea cip');
   if(idxCIP>=0) block = src.slice(idxCIP).split('\n').slice(0,12).join('\n');
 
-  // Încercare 1: pattern „Titlu / Autori.”
   let title='', authors='';
   const m1 = block.match(/^\s*([^\n\/]{4,})\s*\/\s*([^\n\.]{3,})/m);
   if(m1){ title = m1[1].trim().replace(/\s{2,}/g,' '); authors = m1[2].trim(); }
-
-  // Încercare 2: „Autor: …” sau „de …”
   if(!authors){
     const mAu = block.match(/\b(Autor(?:i)?|de)\s*[:]*\s*([^\n\.]{3,})/i);
     if(mAu) authors = mAu[2].trim();
   }
-  // Dacă încă nu avem titlu, caută prima linie mai lungă fără doi-coloni sau cifre multe
   if(!title){
     const lines = block.split('\n').map(s=>s.trim()).filter(s=>s && s.length>4);
-    title = (lines[0]||'').replace(/\s{2,}/g,' ');
-    // curăță trailing „:” dacă e header
-    title = title.replace(/[:\.\-–—]\s*$/,'');
+    title = (lines[0]||'').replace(/\s{2,}/g,' ').replace(/[:\.\-–—]\s*$/,'');
   }
-  // curățări autori
   authors = authors.replace(/\s{2,}/g,' ').replace(/\s*;\s*/g,', ').replace(/\s*,\s*,/g,', ').trim();
   authors = authors.replace(/\b(coord\.?|editori?|eds?\.)\b/gi,'').replace(/\s{2,}/g,' ').trim();
 
-  // Editura + An: tipar frecvent „Localitate : Editura X, 2023.”
+  // Editură + an
   let publisher='', year='';
   const placePub = block.match(/:\s*([^,\n]{2,}?)\s*,\s*(\d{4})/);
   if(placePub){ publisher = placePub[1].trim(); year = placePub[2]; }
-  // „Editura …, 2021”
   if(!publisher){
     const mEd = block.match(/Editura\s+([^\.,\n]{2,})/i);
     if(mEd) publisher = mEd[1].trim();
@@ -495,58 +403,96 @@ function parseCIP(text){
     if(years) year = years[0];
   }
 
-  let type = isbn ? 'isbn' : (issn ? 'issn' : '');
+  let type = isbn ? 'isbn' : (issn ? 'issn' : 'cip');
   return { type, title, authors, publisher, year, isbn, issn };
 }
 
-parseBtn.addEventListener('click', ()=>{
+async function ocrImageSource(imageBitmap){
+  await ensureWorker();
+  // desenează în canvas temporar la lățime max 1600px pentru OCR ok
+  const maxW = 1600, scale = Math.min(1, maxW / imageBitmap.width);
+  const cw = Math.round(imageBitmap.width*scale), ch = Math.round(imageBitmap.height*scale);
+  const tmp = document.createElement('canvas'); tmp.width=cw; tmp.height=ch;
+  const tctx = tmp.getContext('2d'); tctx.drawImage(imageBitmap, 0, 0, cw, ch);
+  msg('Rulez OCR…','wait');
+  const { data:{ text } } = await tessWorker.recognize(tmp);
+  const clean = normalizeOCR(text);
+  ocrText.value = clean;
+  msg('OCR terminat. Apasă „Extrage câmpuri din text”.','ok');
+  log('OCR complet (din imagine).','ok');
+}
+
+async function ocrFromCurrentFrame(silent=false){
+  if(!preview.videoWidth){ if(!silent) msg('Camera nu este activă pentru OCR.', 'err'); return; }
+  await ensureWorker();
+  const cw = preview.videoWidth, ch = preview.videoHeight;
+  snapCanvas.width=cw; snapCanvas.height=ch;
+  const c = snapCanvas.getContext('2d'); c.drawImage(preview, 0, 0, cw, ch);
+  msg('Rulez OCR pe cadru…','wait');
+  const { data:{ text } } = await tessWorker.recognize(snapCanvas);
+  const clean = normalizeOCR(text);
+  if (!silent) { ocrText.value = clean; msg('OCR din cadru finalizat. „Extrage câmpuri”.','ok'); }
+  // dacă e fallback automat, încerci direct parsarea+salvarea
+  if (silent) {
+    const r = parseCIP(clean);
+    const pl = { type:r.type, ean:'', issn:r.issn||'', isbn:r.isbn||'', title:r.title||'—', authors:r.authors||'', publisher:r.publisher||'', publishedDate:'', year:r.year||'', pages:'', source:'ocr' };
+    if (r.isbn || r.issn || r.title) {
+      await handlePayloadAfterLookup(pl);
+    } else {
+      msg('OCR nu a extras nimic util din cadru.', 'err');
+    }
+  }
+}
+
+document.getElementById('parseBtn').addEventListener('click', ()=>{
   const t = ocrText.value;
   if(!t){ msg('Nu există text pentru parsare. Rulează OCR sau lipește text.','err'); return; }
   const r = parseCIP(t);
-  outType.value = r.type || '';
-  outTitle.value = r.title || '';
-  outAuthors.value = r.authors || '';
-  outPublisher.value = r.publisher || '';
-  outYear.value = r.year || '';
-  outISBN.value = r.isbn || '';
-  outISSN.value = r.issn || '';
-  enableSave(true);
-  msg('Extragere completă. Verifică și salvează.','ok');
-
-  if(cbAutoSave.checked){
-    doSave();
+  const pl = { type:r.type, ean:'', issn:r.issn||'', isbn:r.isbn||'', title:r.title||'—', authors:r.authors||'', publisher:r.publisher||'', publishedDate:'', year:r.year||'', pages:'', source:'ocr' };
+  showResultCard(pl); pendingPayload = pl;
+  if (cbAutoSave.checked) {
+    postToSheet(pl).then(resp=>{
+      if (resp.ok) { msg('✔ Salvat automat (OCR).','ok'); log(`✔ Salvat [OCR] ${pl.title||pl.isbn||pl.issn||''}`,'ok'); }
+      else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'),'err'); }
+    });
+  } else {
+    msg('Extragere completă (OCR). Verifică și salvează.','ok');
   }
 });
 
 clearTextBtn.addEventListener('click', ()=>{ ocrText.value=''; msg('Text golit.',''); });
 
-discardBtn.addEventListener('click', ()=>{
-  outType.value=''; outTitle.value=''; outAuthors.value=''; outPublisher.value=''; outYear.value=''; outISBN.value=''; outISSN.value='';
-  enableSave(false);
-  msg('Intrare ignorată.','');
+const ocrFromFileEnable = ()=>{ ocrFromFileBtn.disabled = !imgFile.files?.[0]; };
+imgFile.addEventListener('change', ()=>{ ocrFromFileEnable(); });
+ocrFromFileBtn.addEventListener('click', async ()=>{
+  const f = imgFile.files?.[0]; if(!f){ msg('Alege un fișier imagine.','err'); return; }
+  const bmp = await createImageBitmap(f); await ocrImageSource(bmp);
+});
+snapOcrBtn.addEventListener('click', ()=> ocrFromCurrentFrame(false));
+
+/* Salvare / Nu salva */
+document.getElementById('saveBtn').addEventListener('click', async ()=>{
+  if (!pendingPayload) return;
+  const resp = await postToSheet(pendingPayload);
+  if (resp.ok) { msg('✔ Salvat.', 'ok'); log(`✔ Salvat [${pendingPayload.type?.toUpperCase()}] ${pendingPayload.title||pendingPayload.isbn||pendingPayload.issn||''}`, 'ok'); pendingPayload = null; hideResultCard(); }
+  else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'), 'err'); }
+});
+document.getElementById('discardBtn').addEventListener('click', ()=>{ pendingPayload=null; hideResultCard(); msg('Intrare ignorată.',''); });
+
+/* Manual ISBN (păstrat) */
+document.getElementById('manualLookupBtn').addEventListener('click', async ()=>{
+  const v = document.getElementById('manualIsbn').value.trim().replace(/[^\dXx]/g,'');
+  if (!v){ msg('Introdu un ISBN valid.', 'err'); return; }
+  msg('Caut informații…','wait'); hideResultCard();
+  let det = await lookupISBNLocal(v);
+  let pl = { type:'isbn', ean:'', issn:'', isbn: v, title: det?.title||'—', authors: Array.isArray(det?.authors)? det.authors.join(', '):(det?.authors||''), publisher: det?.publisher||'', publishedDate: det?.publishedDate||'', pages: det?.pages||'', source: det?.source||'' };
+  await handlePayloadAfterLookup(pl);
 });
 
-async function doSave(){
-  const pl = {
-    op: 'save',
-    mode: 'cip',
-    type: (outType.value||'').toLowerCase(),
-    title: outTitle.value||'',
-    authors: outAuthors.value||'',
-    publisher: outPublisher.value||'',
-    year: outYear.value||'',
-    isbn: outISBN.value||'',
-    issn: outISSN.value||'',
-    raw: ocrText.value||''
-  };
-  const resp = await postToSheet(pl);
-  if (resp.ok){ msg('✔ Salvat în foaie.','ok'); log(`✔ Salvat: ${pl.title || pl.isbn || pl.issn}`,'ok'); enableSave(false); }
-  else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'),'err'); log('✖ '+(resp.info||'(unknown)'),'err'); }
-}
-saveBtn.addEventListener('click', doSave);
-
-/* ========= Inițializare ========= */
-if (!secureOk()) msg('Atenție: pentru cameră folosește HTTPS sau rulează local pe localhost.','err');
+/* Inițializări UI */
+const ocrFromFileBtnEl = document.getElementById('ocrFromFileBtn');
+ocrFromFileEnable();
+if (!secureOk()) msg('Atenție: deschide pagina pe HTTPS (GitHub Pages e HTTPS implicit).', 'err');
 </script>
 </body>
 </html>
