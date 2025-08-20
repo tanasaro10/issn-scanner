@@ -42,25 +42,33 @@
     <span id="cfgBadge" class="badge bad">Config lipsă</span>
   </div>
 
-  <!-- Config minimală -->
-  <details class="card">
+  <details class="card" open>
     <summary>Config (Script ID & Secret)</summary>
     <div class="grid">
-      <div><label>Google Script ID</label><input id="scriptId" type="text" placeholder="AKfycbx..." /><div class="muted">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div></div>
-      <div><label>Secret (Token)</label><input id="secret" type="password" placeholder="••••••" /></div>
-      <div><label>Device ID (opțional)</label><input id="deviceId" type="text" placeholder="ex. phone01" /></div>
+      <div>
+        <label>Google Script ID</label>
+        <input id="scriptId" type="text" placeholder="AKfycbx..." />
+        <div class="muted">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div>
+      </div>
+      <div>
+        <label>Secret (Token)</label>
+        <input id="secret" type="password" placeholder="••••••" />
+      </div>
+      <div>
+        <label>Device ID (opțional)</label>
+        <input id="deviceId" type="text" placeholder="ex. phone01" />
+      </div>
       <div class="row" style="align-items:flex-end">
-        <button id="saveCfgBtn">Salvează</button>
-        <button id="clearCfgBtn">Șterge</button>
+        <button id="saveCfgBtn" type="button">Salvează</button>
+        <button id="clearCfgBtn" type="button">Șterge</button>
       </div>
     </div>
   </details>
 
-  <!-- Cameră & captură prin TAP -->
   <div class="card">
     <div class="row">
-      <button id="startBtn">Pornește camera</button>
-      <button id="stopBtn" disabled>Oprește camera</button>
+      <button id="startBtn" type="button">Pornește camera</button>
+      <button id="stopBtn" type="button" disabled>Oprește camera</button>
     </div>
     <div id="cameraShell" class="camera-shell">
       <video id="preview" playsinline muted title="Atinge pentru a îngheța cadrul și a selecta zona CIP"></video>
@@ -72,19 +80,21 @@
     </div>
     <div class="row">
       <input id="imgFile" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" />
-      <button id="ocrFromFileBtn" disabled>OCR din fișier</button>
-      <button id="ocrCropBtn" disabled>OCR pe selecție</button>
+      <button id="ocrFromFileBtn" type="button" disabled>OCR din fișier</button>
+      <button id="ocrCropBtn" type="button" disabled>OCR pe selecție</button>
     </div>
-    <div class="muted">• Camera detectează automat EAN-13. La ISBN, camera se oprește.<br>• Dacă nu detectează nimic, atinge video-ul pentru a îngheța cadrul și a decupa zona CIP.</div>
+    <div class="muted">
+      • Camera detectează automat EAN-13. La ISBN, camera se oprește.<br>
+      • Dacă nu detectează nimic, atinge video-ul pentru a îngheța cadrul și a decupa zona CIP.
+    </div>
   </div>
 
-  <!-- Text OCR + parsare + formular editabil -->
   <div class="card">
     <div><strong>Text OCR (opțional – poți lipi aici)</strong></div>
     <textarea id="ocrText" rows="6" placeholder="Aici apare textul rezultat din OCR…"></textarea>
     <div class="actions">
-      <button id="parseBtn">Extrage câmpuri din text</button>
-      <button id="clearTextBtn">Golește</button>
+      <button id="parseBtn" type="button">Extrage câmpuri din text</button>
+      <button id="clearTextBtn" type="button">Golește</button>
     </div>
   </div>
 
@@ -103,8 +113,8 @@
         <div class="field" style="grid-column:1/-1"><label>Text CIP (raw)</label><textarea id="outRaw" rows="4" placeholder="textul integral OCR"></textarea></div>
       </div>
       <div class="actions">
-        <button id="saveBtn" disabled>Salvează</button>
-        <button id="discardBtn" disabled>Nu salva</button>
+        <button id="saveBtn" type="button" disabled>Salvează</button>
+        <button id="discardBtn" type="button" disabled>Nu salva</button>
       </div>
     </div>
   </div>
@@ -117,42 +127,111 @@
 <script>
 /* ============ Config minimal ============ */
 const BASE_WEBAPP = "https://script.google.com/macros/s/";
-const badge = document.getElementById('cfgBadge');
-const scriptIdEl = document.getElementById('scriptId');
-const secretEl   = document.getElementById('secret');
-const deviceEl   = document.getElementById('deviceId');
-const statusBox  = document.getElementById('statusBox');
+const badge       = document.getElementById('cfgBadge');
+const scriptIdEl  = document.getElementById('scriptId');
+const secretEl    = document.getElementById('secret');
+const deviceEl    = document.getElementById('deviceId');
+const statusBox   = document.getElementById('statusBox');
 
-function setBadge(ok){ if(ok){ badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
-function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
-function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret)); }
-function clearCfg(){ localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device'); scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.','ok'); }
-function fillInputsFromStorage(){ const {scriptId, secret, device} = getCfg(); scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device; setBadge(Boolean(scriptId && secret)); }
+function setBadge(ok){
+  if(ok){
+    badge.textContent='Config OK';
+    badge.classList.remove('bad');
+  } else {
+    badge.textContent='Config lipsă';
+    badge.classList.add('bad');
+  }
+}
+function getCfg(){
+  return {
+    scriptId: localStorage.getItem('scanner_script_id') || '',
+    secret:   localStorage.getItem('scanner_secret')    || '',
+    device:   localStorage.getItem('scanner_device')    || ''
+  };
+}
+function saveCfg({scriptId, secret, device}){
+  if (typeof scriptId === 'string') localStorage.setItem('scanner_script_id', scriptId.trim());
+  if (typeof secret   === 'string') localStorage.setItem('scanner_secret',    secret.trim());
+  if (typeof device   === 'string') localStorage.setItem('scanner_device',    device.trim());
+  fillInputsFromStorage();
+  msg('Config salvată local.','ok');
+}
+function clearCfg(){
+  localStorage.removeItem('scanner_script_id');
+  localStorage.removeItem('scanner_secret');
+  localStorage.removeItem('scanner_device');
+  scriptIdEl.value=''; secretEl.value=''; deviceEl.value='';
+  setBadge(false);
+  msg('Config ștearsă.','');
+}
+function fillInputsFromStorage(){
+  const {scriptId, secret, device} = getCfg();
+  scriptIdEl.value=scriptId;
+  secretEl.value=secret;
+  deviceEl.value=device;
+  setBadge(Boolean(scriptId && secret));
+}
 fillInputsFromStorage();
-document.getElementById('saveCfgBtn').addEventListener('click',()=>{ saveCfg({scriptId:scriptIdEl.value,secret:secretEl.value,device:deviceEl.value}); msg('Config salvată local.','ok'); });
+
+document.getElementById('saveCfgBtn').addEventListener('click', ()=>{
+  saveCfg({scriptId:scriptIdEl.value, secret:secretEl.value, device:deviceEl.value});
+});
 document.getElementById('clearCfgBtn').addEventListener('click', clearCfg);
-function msg(text, type=''){ statusBox.className='status ' + (type||''); statusBox.textContent=text; }
-function log(text, cls=''){ const last=document.getElementById('last'); last.innerHTML = `<div class="${cls}">${new Date().toLocaleTimeString()} — ${text}</div>` + last.innerHTML; }
+
+function msg(text, type=''){
+  statusBox.className='status ' + (type||'');
+  statusBox.textContent=text;
+}
+function log(text, cls=''){
+  const last=document.getElementById('last');
+  last.innerHTML = `<div class="${cls}">${new Date().toLocaleTimeString()} — ${text}</div>` + last.innerHTML;
+}
 const secureOk = () => (window.isSecureContext || location.protocol==='https:' || location.hostname==='localhost');
-function buildWebhook(){ const {scriptId}=getCfg(); return scriptId ? (BASE_WEBAPP+scriptId+"/exec") : ''; }
+function buildWebhook(){
+  const {scriptId}=getCfg();
+  return scriptId ? (BASE_WEBAPP + scriptId + "/exec") : '';
+}
 
 async function postToSheet(payload){
   const {secret, device} = getCfg(); const webhook = buildWebhook();
   if (!webhook || !secret) return { ok:false, info:'Config incompletă (Script ID/Secret).' };
   try {
-    const r = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token:secret, deviceId: device||'', ...payload }) });
-    const j = await r.json().catch(()=> ({})); return { ok: !!j.ok, info: j.error || '' };
+    const r = await fetch(webhook, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token:secret, deviceId: device||'', ...payload })
+    });
+    const j = await r.json().catch(()=> ({}));
+    return { ok: !!j.ok, info: j.error || '' };
   } catch (e1) {
     try {
-      const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k, (v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
-      const r2 = await fetch(webhook, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
-      const j2 = await r2.json().catch(()=> ({})); return { ok: (j2.ok===true)||r2.ok, info: j2.error || '' };
+      const form = new URLSearchParams();
+      form.set('token', secret);
+      form.set('deviceId', device||'');
+      Object.entries(payload).forEach(([k,v])=> form.set(k, Array.isArray(v)? v.join(', ') : (v==null?'':String(v))));
+      const r2 = await fetch(webhook, {
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body: form.toString()
+      });
+      const j2 = await r2.json().catch(()=> ({}));
+      return { ok: (j2.ok===true)||r2.ok, info: j2.error || '' };
     } catch (e2) {
       try {
-        const form = new URLSearchParams(); form.set('token', secret); form.set('deviceId', device||''); Object.entries(payload).forEach(([k,v])=> form.set(k,(v==null)?'':(Array.isArray(v)?v.join(', '):String(v))));
-        await fetch(webhook, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+        const form = new URLSearchParams();
+        form.set('token', secret);
+        form.set('deviceId', device||'');
+        Object.entries(payload).forEach(([k,v])=> form.set(k, Array.isArray(v)? v.join(', ') : (v==null?'':String(v))));
+        await fetch(webhook, {
+          method:'POST',
+          mode:'no-cors',
+            headers:{'Content-Type':'application/x-www-form-urlencoded'},
+          body: form.toString()
+        });
         return { ok:true, info:'sent-no-cors' };
-      } catch (e3) { return { ok:false, info:String(e3) }; }
+      } catch (e3) {
+        return { ok:false, info:String(e3) };
+      }
     }
   }
 }
@@ -167,7 +246,15 @@ const snapCanvas = document.getElementById('snapCanvas');
 let stream=null, detector=null, scanning=false;
 let lastEan=null, lastAt=0;
 
-async function ensureBarcodeDetector(){ if (!('BarcodeDetector' in window)) return false; try{ const f=await window.BarcodeDetector.getSupportedFormats(); return f.includes('ean_13')||f.includes('ean13'); }catch{ return false; } }
+async function ensureBarcodeDetector(){
+  if (!('BarcodeDetector' in window)) return false;
+  try{
+    const f = await window.BarcodeDetector.getSupportedFormats();
+    return f.includes('ean_13') || f.includes('ean13');
+  }catch{
+    return false;
+  }
+}
 async function startCamera(){
   if (!secureOk()) { msg('Deschide pe HTTPS sau localhost pentru acces cameră.', 'err'); return; }
   try{
@@ -178,14 +265,18 @@ async function startCamera(){
     const ok = await ensureBarcodeDetector();
     if (!ok) { msg('Browserul nu suportă BarcodeDetector (EAN-13). Poți folosi doar OCR.', 'err'); return; }
     detector = new window.BarcodeDetector({ formats:['ean_13'] });
-    scanning = true; msg('Scanez EAN-13… Tăpi pe video ca să îngheți cadrul dacă nu găsește.', '');
+    scanning = true; msg('Scanez EAN-13… Tap pe video ca să îngheți cadrul dacă nu găsește.', '');
     requestAnimationFrame(scanLoop);
   }catch(e){ msg('Eroare pornire cameră: '+(e.message||e.name), 'err'); }
 }
-function stopCamera(collapse=true){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; if(collapse){ cameraShell.classList.remove('active'); } }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; cameraShell.classList.remove('active'); }
+function stopCamera(collapse=true){
+  try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{}
+  stream=null; preview.srcObject=null; scanning=false;
+  stopBtn.disabled=true; startBtn.disabled=false;
+  if(collapse) cameraShell.classList.remove('active');
+}
 
 startBtn.addEventListener('click', ()=>{
-  // Prepare UI to show live video again
   preview.style.display = 'block';
   try { preview.play(); } catch(e){}
   stage.style.display = 'none';
@@ -195,18 +286,14 @@ startBtn.addEventListener('click', ()=>{
 });
 stopBtn.addEventListener('click', ()=>{ scanning=false; stopCamera(); msg('Camera oprită.', ''); });
 
-// TAP pe video -> îngheață cadrul pentru crop/OCR
 preview.addEventListener('click', async ()=>{
   if (!preview.videoWidth) return;
-  // Capture current frame
   const cw = preview.videoWidth, ch = preview.videoHeight;
   snapCanvas.width = cw; snapCanvas.height = ch;
   snapCanvas.getContext('2d').drawImage(preview, 0, 0, cw, ch);
   const bmp = await createImageBitmap(snapCanvas);
-  // Pause scanning and video, but DO NOT stop or collapse the camera shell
   scanning = false;
   try { preview.pause(); } catch(e){}
-  // Hide live video and show frozen frame canvas
   preview.style.display = 'none';
   drawImageToCropCanvas(bmp);
   stage.style.display = 'block';
@@ -214,7 +301,12 @@ preview.addEventListener('click', async ()=>{
   msg('Cadrul a fost înghețat. Selectează zona CIP și apasă „OCR pe selecție”.','ok');
 });
 
-function classifyPublication(ean13){ if(!/^\d{13}$/.test(ean13)) return {type:'other'}; if(ean13.startsWith('977')) return {type:'issn'}; if(ean13.startsWith('978')||ean13.startsWith('979')) return {type:'isbn'}; return {type:'other'}; }
+function classifyPublication(ean13){
+  if(!/^\d{13}$/.test(ean13)) return {type:'other'};
+  if(ean13.startsWith('977')) return {type:'issn'};
+  if(ean13.startsWith('978')||ean13.startsWith('979')) return {type:'isbn'};
+  return {type:'other'};
+}
 
 async function scanLoop(){
   if (!detector || !scanning) return;
@@ -227,7 +319,6 @@ async function scanLoop(){
         lastEan=raw; lastAt=now;
         const cls = classifyPublication(raw);
         if (cls.type==='isbn'){
-          // ISBN găsit -> oprește scanarea, ascunde live preview (fără a colapsa containerul)
           scanning = false;
           try { preview.pause(); } catch(e){}
           preview.style.display='none';
@@ -235,10 +326,8 @@ async function scanLoop(){
           populateForm({ type:'isbn', isbn: raw });
           return;
         } else if (cls.type==='issn'){
-          // opțional: la ISSN nu închidem camera (dar putem pre-popula)
           msg('ISSN detectat. Poți completa și salva.', 'ok');
           populateForm({ type:'issn', issn: raw });
-          // nu oprim camera, în caz că vrei să cauți alt volum
         }
       }
     }
@@ -266,22 +355,63 @@ let lastImageBitmap = null;
 let cropStart = null;
 let cropEnd = null;
 
-async function ensureWorker(){ if(!tessWorker){ msg('Inițializez OCR…','wait'); tessWorker = await Tesseract.createWorker('ron+eng'); } }
-function normalizeOCR(t){ if(!t) return ''; let s=t.replace(/\r/g,''); s=s.replace(/-\n/g,''); s=s.replace(/[ \t]+\n/g,'\n'); s=s.replace(/\n{3,}/g,'\n\n'); s=s.replace(/[ \t]{2,}/g,' '); s=s.replace(/I S B N/gi,'ISBN').replace(/I S S N/gi,'ISSN'); return s.trim(); }
-function cleanIsbn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===10||s.length===13) return s; return s; }
-function cleanIssn(raw){ if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase(); if(s.length===8){ return s.slice(0,4)+'-'+s.slice(4);} return s; }
+async function ensureWorker(){
+  if(!tessWorker){
+    msg('Inițializez OCR…','wait');
+    tessWorker = await Tesseract.createWorker('ron+eng');
+  }
+}
+function normalizeOCR(t){
+  if(!t) return '';
+  let s=t.replace(/\r/g,'');
+  s=s.replace(/-\n/g,'');
+  s=s.replace(/[ \t]+\n/g,'\n');
+  s=s.replace(/\n{3,}/g,'\n\n');
+  s=s.replace(/[ \t]{2,}/g,' ');
+  return s.trim();
+}
+function cleanIsbn(raw){
+  if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase();
+  return s;
+}
+function cleanIssn(raw){
+  if(!raw) return ''; let s=raw.replace(/[^0-9Xx]/g,'').toUpperCase();
+  if(s.length===8) return s.slice(0,4)+'-'+s.slice(4);
+  return s;
+}
 function parseCIP(text){
   const src=(text||'').trim(), lower=src.toLowerCase();
-  let isbnMatch=src.match(/ISBN(?:\s*13)?\s*[:]?\s*([0-9Xx][0-9\-\sXx]{7,})/); if(!isbnMatch){ isbnMatch=src.match(/\b(97[89][0-9\-\s]{8,}[0-9Xx])\b/); } const isbn=cleanIsbn(isbnMatch?.[1]||'');
-  let issnMatch=src.match(/ISSN\s*[:]?\s*([0-9Xx][0-9\-\sXx]{3,})/i); const issn=cleanIssn(issnMatch?.[1]||'');
-  let block=src; const idxCIP=lower.indexOf('descrierea cip'); if(idxCIP>=0) block=src.slice(idxCIP).split('\n').slice(0,12).join('\n');
-  let title='', authors=''; const m1=block.match(/^\s*([^\n\/]{4,})\s*\/\s*([^\n\.]{3,})/m); if(m1){ title=m1[1].trim().replace(/\s{2,}/g,' '); authors=m1[2].trim(); }
-  if(!authors){ const mAu=block.match(/\b(Autor(?:i)?|de)\s*[:]?\s*([^\n\.]{3,})/i); if(mAu) authors=mAu[2].trim(); }
-  if(!title){ const lines=block.split('\n').map(s=>s.trim()).filter(s=>s&&s.length>4); title=(lines[0]||'').replace(/\s{2,}/g,' ').replace(/[:\.\-–—]\s*$/,''); }
-  authors=authors.replace(/\s{2,}/g,' ').replace(/\s*;\s*/g,', ').replace(/\s*,\s*,/g,', ').replace(/\b(coord\.?|editori?|eds?\.)\b/gi,'').trim();
-  let publisher='', year=''; const placePub=block.match(/:\s*([^,\n]{2,}?)\s*,\s*(\d{4})/); if(placePub){ publisher=placePub[1].trim(); year=placePub[2]; }
-  if(!publisher){ const mEd=block.match(/Editura\s+([^\.,\n]{2,})/i); if(mEd) publisher=mEd[1].trim(); }
-  if(!year){ const years=src.match(/\b(19|20)\d{2}\b/g); if(years) year=years[0]; }
+  let isbnMatch=src.match(/ISBN(?:\s*13)?\s*[:]?\s*([0-9Xx][0-9\-\sXx]{7,})/);
+  if(!isbnMatch){ isbnMatch=src.match(/\b(97[89][0-9\-\s]{8,}[0-9Xx])\b/); }
+  const isbn=cleanIsbn(isbnMatch?.[1]||'');
+  let issnMatch=src.match(/ISSN\s*[:]?\s*([0-9Xx][0-9\-\sXx]{3,})/i);
+  const issn=cleanIssn(issnMatch?.[1]||'');
+  let block=src; const idxCIP=lower.indexOf('descrierea cip');
+  if(idxCIP>=0) block=src.slice(idxCIP).split('\n').slice(0,12).join('\n');
+  let title='', authors='';
+  const m1=block.match(/^\s*([^\n\/]{4,})\s*\/\s*([^\n\.]{3,})/m);
+  if(m1){ title=m1[1].trim().replace(/\s{2,}/g,' '); authors=m1[2].trim(); }
+  if(!authors){
+    const mAu=block.match(/\b(Autor(?:i)?|de)\s*[:]?\s*([^\n\.]{3,})/i);
+    if(mAu) authors=mAu[2].trim();
+  }
+  if(!title){
+    const lines=block.split('\n').map(s=>s.trim()).filter(s=>s&&s.length>4);
+    title=(lines[0]||'').replace(/\s{2,}/g,' ').replace(/[:\.\-–—]\s*$/,'');
+  }
+  authors=authors.replace(/\s{2,}/g,' ').replace(/\s*;\s*/g,', ').replace(/\s*,\s*,/g,', ')
+    .replace(/\b(coord\.?|editori?|eds?\.)\b/gi,'').trim();
+  let publisher='', year='';
+  const placePub=block.match(/:\s*([^,\n]{2,}?)\s*,\s*(\d{4})/);
+  if(placePub){ publisher=placePub[1].trim(); year=placePub[2]; }
+  if(!publisher){
+    const mEd=block.match(/Editura\s+([^\.,\n]{2,})/i);
+    if(mEd) publisher=mEd[1].trim();
+  }
+  if(!year){
+    const years=src.match(/\b(19|20)\d{2}\b/g);
+    if(years) year=years[0];
+  }
   let type = isbn ? 'isbn' : (issn ? 'issn' : 'cip');
   return { type, title, authors, publisher, year, isbn, issn, raw: src };
 }
@@ -303,7 +433,12 @@ function redrawWithSelection(){
   if(cropStart && cropEnd){
     const x=Math.min(cropStart.x,cropEnd.x), y=Math.min(cropStart.y,cropEnd.y);
     const w=Math.abs(cropStart.x-cropEnd.x), h=Math.abs(cropStart.y-cropEnd.y);
-    cropCtx.save(); cropCtx.strokeStyle='#00ff99'; cropCtx.lineWidth=2; cropCtx.setLineDash([6,4]); cropCtx.strokeRect(x+.5,y+.5,w,h); cropCtx.restore();
+    cropCtx.save();
+    cropCtx.strokeStyle='#00ff99';
+    cropCtx.lineWidth=2;
+    cropCtx.setLineDash([6,4]);
+    cropCtx.strokeRect(x+.5,y+.5,w,h);
+    cropCtx.restore();
   }
 }
 function getCropCanvas(){
@@ -334,12 +469,13 @@ cropCanvas.addEventListener('touchend',e=>{ e.preventDefault(); redrawWithSelect
 async function ensureWorkerAndRecognize(srcCanvasOrImage){
   await ensureWorker(); msg('Rulez OCR…','wait');
   const { data:{ text } } = await tessWorker.recognize(srcCanvasOrImage);
-  const clean=normalizeOCR(text); ocrText.value=clean; msg('OCR terminat. „Extrage câmpuri din text”.','ok'); return clean;
+  const clean=normalizeOCR(text); ocrText.value=clean;
+  msg('OCR terminat. „Extrage câmpuri din text”.','ok');
+  return clean;
 }
 ocrCropBtn.addEventListener('click', async ()=>{
   const sel=getCropCanvas(); if(!sel){ msg('Selectează zona CIP pentru OCR.','err'); return; }
   const clean=await ensureWorkerAndRecognize(sel);
-  // opțional: auto-extragere
   const r=parseCIP(clean); populateForm(r); msg('Extragere din OCR. Poți corecta și salva.','ok');
 });
 imgFile.addEventListener('change',()=>{ ocrFromFileBtn.disabled=!imgFile.files?.[0]; });
@@ -349,7 +485,7 @@ ocrFromFileBtn.addEventListener('click', async ()=>{
   msg('Imagine încărcată. Selectează zona CIP și apasă „OCR pe selecție”.','');
 });
 
-/* Formular editabil + salvare */
+/* Formular + salvare */
 function populateForm(pl){
   document.getElementById('outType').value = pl.type || '';
   document.getElementById('outTitle').value = pl.title || '';
@@ -359,8 +495,8 @@ function populateForm(pl){
   document.getElementById('outISBN').value = pl.isbn || '';
   document.getElementById('outISSN').value = pl.issn || '';
   document.getElementById('outRaw').value = pl.raw || '';
-  document.getElementById('saveBtn').disabled=false;
-  document.getElementById('discardBtn').disabled=false;
+  saveBtn.disabled=false;
+  discardBtn.disabled=false;
 }
 parseBtn.addEventListener('click', ()=>{
   const t=ocrText.value; if(!t){ msg('Nu există text pentru parsare.','err'); return; }
@@ -381,14 +517,22 @@ async function doSave(){
     raw:document.getElementById('outRaw').value||''
   };
   const resp=await postToSheet(pl);
-  if(resp.ok){ msg('✔ Salvat.', 'ok'); log(`✔ Salvat: ${pl.title || pl.isbn || pl.issn}`,'ok'); document.getElementById('saveBtn').disabled=true; document.getElementById('discardBtn').disabled=true; }
-  else { msg('✖ Eroare la salvare: '+(resp.info||'(unknown)'),'err'); }
+  if(resp.ok){
+    msg('✔ Salvat.', 'ok');
+    log(`✔ Salvat: ${pl.title || pl.isbn || pl.issn}`,'ok');
+    saveBtn.disabled=true;
+    discardBtn.disabled=true;
+  } else {
+    msg('✖ Eroare la salvare: '+(resp.info||'(necunoscut)'),'err');
+  }
   return resp;
 }
-document.getElementById('saveBtn').addEventListener('click', doSave);
-document.getElementById('discardBtn').addEventListener('click', ()=>{
-  ['outType','outTitle','outAuthors','outPublisher','outYear','outISBN','outISSN','outRaw'].forEach(id=> document.getElementById(id).value='');
-  document.getElementById('saveBtn').disabled=true; document.getElementById('discardBtn').disabled=true;
+saveBtn.addEventListener('click', doSave);
+discardBtn.addEventListener('click', ()=>{
+  ['outType','outTitle','outAuthors','outPublisher','outYear','outISBN','outISSN','outRaw']
+    .forEach(id=> document.getElementById(id).value='');
+  saveBtn.disabled=true;
+  discardBtn.disabled=true;
   msg('Intrare ignorată.','');
 });
 
