@@ -23,6 +23,7 @@
     .status.wait { background:#fffdf3; border-color:#e8d28b; }
     .status.ok   { background:#f4fdf7; border-color:#cce9d7; }
     .status.err  { background:#fff4f4; border-color:#f0b6b6; }
+    .status.warn { background:#fffdf3; border-color:#e8d28b; }
     .log { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space:pre-wrap; font-size:12px; }
     .ok { color:#12a150; } .err { color:#b00020; }
     .camera-shell { overflow:hidden; transition:max-height .25s ease, padding .25s ease, border-width .25s ease; max-height:0; padding:0 0; border:0 solid var(--line); border-radius:12px; background:#000; }
@@ -320,14 +321,14 @@ async function scanLoop(){
         const cls = classifyPublication(raw);
         if (cls.type==='isbn'){
           scanning = false;
-          try { preview.pause(); } catch(e){}
-          preview.style.display='none';
-          msg('ISBN detectat. Am completat formularul.','ok');
-          populateForm({ type:'isbn', isbn: raw });
+          stopCamera(false); // Stop camera but keep container visible
+          await fetchAndFillMetadata({ isbn: raw });
           return;
         } else if (cls.type==='issn'){
-          msg('ISSN detectat. Poți completa și salva.', 'ok');
-          populateForm({ type:'issn', issn: raw });
+          scanning = false;
+          stopCamera(false); // Stop camera but keep container visible
+          await fetchAndFillMetadata({ issn: raw });
+          return;
         }
       }
     }
@@ -414,6 +415,193 @@ function parseCIP(text){
   }
   let type = isbn ? 'isbn' : (issn ? 'issn' : 'cip');
   return { type, title, authors, publisher, year, isbn, issn, raw: src };
+}
+
+/* ============ Metadata Lookup ============ */
+async function fetchJSON(url, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, { 
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ISSN-Scanner/1.0' }
+    });
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      return null;
+    }
+    
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.warn('Fetch error:', error);
+    return null;
+  }
+}
+
+function normalizeYear(y) {
+  if (!y) return '';
+  const str = String(y);
+  const match = str.match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : '';
+}
+
+async function lookupISBN(isbn) {
+  if (!isbn) return null;
+  
+  try {
+    // Try OpenLibrary first
+    const olUrl = `https://openlibrary.org/isbn/${isbn}.json`;
+    const olData = await fetchJSON(olUrl);
+    
+    if (olData && olData.title) {
+      const result = {
+        title: olData.title || '',
+        authors: '',
+        publisher: '',
+        year: ''
+      };
+      
+      // Extract authors
+      if (olData.authors && olData.authors.length > 0) {
+        const authorPromises = olData.authors.slice(0, 3).map(async (author) => {
+          if (author.key) {
+            const authorData = await fetchJSON(`https://openlibrary.org${author.key}.json`);
+            return authorData?.name || '';
+          }
+          return '';
+        });
+        const authorNames = await Promise.all(authorPromises);
+        result.authors = authorNames.filter(name => name).join(', ');
+      }
+      
+      // Extract publisher and year
+      if (olData.publishers && olData.publishers.length > 0) {
+        result.publisher = olData.publishers[0];
+      }
+      
+      if (olData.publish_date) {
+        result.year = normalizeYear(olData.publish_date);
+      }
+      
+      // If we have basic info, return it (might fill missing fields from Google Books)
+      if (result.title) {
+        return result;
+      }
+    }
+    
+    // Fallback to Google Books API
+    const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+    const gbData = await fetchJSON(gbUrl);
+    
+    if (gbData && gbData.items && gbData.items.length > 0) {
+      const book = gbData.items[0].volumeInfo;
+      return {
+        title: book.title || '',
+        authors: book.authors ? book.authors.join(', ') : '',
+        publisher: book.publisher || '',
+        year: normalizeYear(book.publishedDate)
+      };
+    }
+    
+  } catch (error) {
+    console.warn('ISBN lookup error:', error);
+  }
+  
+  return null;
+}
+
+async function lookupISSN(issn) {
+  if (!issn) return null;
+  
+  try {
+    // Try CrossRef Journal API first
+    const journalUrl = `https://api.crossref.org/journals/${issn}`;
+    const journalData = await fetchJSON(journalUrl);
+    
+    if (journalData && journalData.message && journalData.message.title) {
+      return {
+        title: journalData.message.title,
+        authors: '', // Journals typically don't have authors
+        publisher: journalData.message.publisher || '',
+        year: ''
+      };
+    }
+    
+    // Fallback to CrossRef Works API for recent publications
+    const worksUrl = `https://api.crossref.org/works?sort=published&order=desc&rows=1&filter=issn:${issn}`;
+    const worksData = await fetchJSON(worksUrl);
+    
+    if (worksData && worksData.message && worksData.message.items && worksData.message.items.length > 0) {
+      const work = worksData.message.items[0];
+      return {
+        title: work['container-title'] && work['container-title'][0] ? work['container-title'][0] : '',
+        authors: '',
+        publisher: work.publisher || '',
+        year: work.published ? normalizeYear(work.published['date-parts'][0][0]) : ''
+      };
+    }
+    
+  } catch (error) {
+    console.warn('ISSN lookup error:', error);
+  }
+  
+  return null;
+}
+
+async function fetchAndFillMetadata({ isbn, issn }) {
+  const isIsbn = !!isbn;
+  const code = isbn || issn;
+  const type = isIsbn ? 'ISBN' : 'ISSN';
+  
+  if (!code) return;
+  
+  // Show searching message
+  msg(`Caut metadate pentru ${type} ${code}...`, 'wait');
+  
+  try {
+    const metadata = isIsbn ? await lookupISBN(isbn) : await lookupISSN(issn);
+    
+    if (metadata && metadata.title) {
+      // Found metadata - populate form
+      const formData = {
+        type: isIsbn ? 'isbn' : 'issn',
+        title: metadata.title,
+        authors: metadata.authors,
+        publisher: metadata.publisher,
+        year: metadata.year,
+        isbn: isbn || '',
+        issn: issn || ''
+      };
+      
+      populateForm(formData);
+      msg(`Metadate ${type} găsite. Verifică și salvează.`, 'ok');
+    } else {
+      // No metadata found - populate minimal form and suggest OCR
+      const formData = {
+        type: isIsbn ? 'isbn' : 'issn',
+        isbn: isbn || '',
+        issn: issn || ''
+      };
+      
+      populateForm(formData);
+      msg(`Nu am găsit metadate pentru acest ${type}. Folosește OCR.`, 'warn');
+    }
+  } catch (error) {
+    console.error('Metadata fetch error:', error);
+    
+    // Error case - populate minimal form
+    const formData = {
+      type: isIsbn ? 'isbn' : 'issn',
+      isbn: isbn || '',
+      issn: issn || ''
+    };
+    
+    populateForm(formData);
+    msg('Eroare la căutarea metadatelor. Poți folosi OCR.', 'err');
+  }
 }
 
 /* randare & selecție */
