@@ -43,7 +43,7 @@
   </div>
 
   <!-- Config minimală -->
-  <details class="card">
+  <details class="card" open>
     <summary>Config (Script ID & Secret)</summary>
     <div class="grid">
       <div><label>Google Script ID</label><input id="scriptId" type="text" placeholder="AKfycbx..." /><div class="muted">Webhook: <code>https://script.google.com/macros/s/&lt;ID&gt;/exec</code></div></div>
@@ -125,7 +125,7 @@ const statusBox  = document.getElementById('statusBox');
 
 function setBadge(ok){ if(ok){ badge.textContent='Config OK'; badge.classList.remove('bad'); } else { badge.textContent='Config lipsă'; badge.classList.add('bad'); } }
 function getCfg(){ return { scriptId: localStorage.getItem('scanner_script_id')||'', secret: localStorage.getItem('scanner_secret')||'', device: localStorage.getItem('scanner_device')||'' }; }
-function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); const c=getCfg(); setBadge(Boolean(c.scriptId && c.secret)); }
+function saveCfg({scriptId, secret, device}){ if(typeof scriptId==='string') localStorage.setItem('scanner_script_id',scriptId.trim()); if(typeof secret==='string') localStorage.setItem('scanner_secret',secret.trim()); if(typeof device==='string') localStorage.setItem('scanner_device',device.trim()); fillInputsFromStorage(); }
 function clearCfg(){ localStorage.removeItem('scanner_script_id'); localStorage.removeItem('scanner_secret'); localStorage.removeItem('scanner_device'); scriptIdEl.value=''; secretEl.value=''; deviceEl.value=''; setBadge(false); log('Config ștearsă.','ok'); }
 function fillInputsFromStorage(){ const {scriptId, secret, device} = getCfg(); scriptIdEl.value=scriptId; secretEl.value=secret; deviceEl.value=device; setBadge(Boolean(scriptId && secret)); }
 fillInputsFromStorage();
@@ -182,7 +182,7 @@ async function startCamera(){
     requestAnimationFrame(scanLoop);
   }catch(e){ msg('Eroare pornire cameră: '+(e.message||e.name), 'err'); }
 }
-function stopCamera(collapse=true){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; if(collapse){ cameraShell.classList.remove('active'); } }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; cameraShell.classList.remove('active'); }
+function stopCamera(collapse=true){ try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch{} stream=null; preview.srcObject=null; scanning=false; stopBtn.disabled=true; startBtn.disabled=false; if(collapse) cameraShell.classList.remove('active'); }
 
 startBtn.addEventListener('click', ()=>{
   // Prepare UI to show live video again
